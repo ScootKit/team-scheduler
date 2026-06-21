@@ -1,6 +1,5 @@
 <template>
   <v-app>
-    <DiscordBanner />
     <AutoSnackbar color="error" :text="error" />
     <AutoSnackbar color="tw-bg-blue" :text="info" />
     <SignInNotSupportedDialog v-model="webviewDialog" />
@@ -85,8 +84,6 @@
 </template>
 
 <style>
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans&display=swap");
-
 html {
   overflow-y: auto !important;
   /* overscroll-behavior: none; */
@@ -237,7 +234,6 @@ import isWebview from "is-ua-webview"
 import NewDialog from "./components/NewDialog.vue"
 import UpgradeDialog from "@/components/pricing/UpgradeDialog.vue"
 import SignInDialog from "@/components/SignInDialog.vue"
-import DiscordBanner from "@/components/DiscordBanner.vue"
 
 export default {
   name: "App",
@@ -257,7 +253,6 @@ export default {
     Footer,
     UpgradeDialog,
     SignInDialog,
-    DiscordBanner,
   },
 
   data: () => ({

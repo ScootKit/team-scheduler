@@ -9,6 +9,8 @@
     "test:unit:watch": "vitest"
   },
   "dependencies": {
+    "@fontsource/dm-sans": "^5.2.8",
+    "@mdi/font": "^7.4.47",
     "@rive-app/canvas": "^2.10.0",
     "bson-objectid": "^2.0.4",
     "canvas-confetti": "^1.9.3",

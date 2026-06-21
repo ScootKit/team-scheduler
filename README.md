@@ -31,39 +31,29 @@ This repository (`ScootKit/team-scheduler`) is an internal fork of upstream
 [`schej-it/timeful.app`](https://github.com/schej-it/timeful.app), rebranded
 **WannPassts** ("Wann passt's?"). It is a private, internal scheduling tool for
 ScootKit — **not** a general-purpose product. It is intended for meetings with
-at least one external participant; for internal employee-to-employee scheduling,
-use Google Calendar's own tools.
+at least one external participant.
 
 It has diverged substantially from upstream. Notable changes:
 
 **Access & accounts**
 
 - **Domain-gated sign-in** via an email-domain allowlist (`ALLOWED_EMAIL_DOMAINS`,
-  e.g. `scootkit.com,helper.scootkit.co`). Employees (`@scootkit.com`) sign in
-  with Google OAuth or email OTP; helpers (`@helper.scootkit.co`) sign in with
-  email **OTP delivered via Amazon SES**. A clear error is shown for disallowed
-  domains.
+  e.g. `scootkit.com`). **OTP delivered via Amazon SES**.
 - **Anonymous event creation disabled** (sign-in required); guests can still
-  view/respond to shared event links, and must **record privacy-policy consent**
-  (timestamp + policy version) before submitting.
-- Last name is **optional**.
+  view/respond to shared event links, and must record privacy-policy consent before submitting.
 
 **Removed**
 
 - **Monetization & paywalls** — Stripe, premium, and the free-event limit
   (everyone is treated as premium).
 - **All ads & third-party tracking** — Publift, Primis, Carbon ads; Google Tag
-  Manager; **PostHog (fully stripped — no calls to `e.timeful.app`)**; the
-  `geolocation-db.com` IP lookup.
-- **Public marketing surface** — landing page (→ redirects to sign-in), Reddit/
-  GitHub nudges, the (broken) "Convert When2meet" tool, `contact@` + social links.
+  Manager; PostHog; the `geolocation-db.com` IP lookup.
+- **Public marketing surface** — landing page (→ redirects to sign-in), the "Convert When2meet" tool.
 - **Email features** — reminder emails, "collect respondents' email", and
   join-notification emails.
-- **Bots** — the Slack bot (it mounted an unauthenticated `/api/slackbot`
-  endpoint) and the dead Discord bot are no longer wired up.
+- **Bots** — the Slack bot and the dead Discord bot are no longer wired up.
 - **Calendar providers** — **Apple Calendar (CalDAV)** and **Outlook (Microsoft
-  Graph)** support is removed, which also drops the `github.com/jonyTF/go-webdav`
-  fork and the `@azure/msal-*` deps. **Only Google + ICS** calendar import remain.
+  Graph)** support is removed. **Only Google + ICS** calendar import remain.
 
 **Added**
 
@@ -82,27 +72,18 @@ It has diverged substantially from upstream. Notable changes:
   protection, OTP send rate-limiting, analytics Basic-Auth fail-closed,
   calendar-parser & event-route hardening).
 - Additional: Google `email_verified` enforced, `check-email` enumeration fixed,
-  OTP delivered via SES with **no code logging in production**, `editEvent`
-  requires auth, per-event topic flood cap, ICS feed size cap, meeting links
+  OTP delivered via SES, `editEvent` requires auth, per-event topic flood cap, ICS feed size cap, meeting links
   restricted to `http(s)`. Bumped `gin-contrib/cors` to 1.6.0.
 
 **Branding / legal**
 
-- `WannPassts` wordmark throughout; **Impressum** + external **Privacy Policy**
+- `WannPassts` used as branding; **Impressum** + external **Privacy Policy**
   links (env-driven — see below); an AGPL **"Source code"** link in the footer.
 
 Upstream identifiers (Go module `schej.it/server`, Mongo DB `schej-it`) are
 intentionally left unchanged.
 
 ### Relationship to upstream
-
-Upstream is kept as the `upstream` git remote **only** so we can occasionally
-review and **cherry-pick individual security fixes**:
-
-```bash
-git fetch upstream
-git log upstream/main   # review; cherry-pick only relevant security commits
-```
 
 We do **not** merge upstream wholesale — this fork has diverged too far
 (removed providers/features, different access model), so clean merges aren't
