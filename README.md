@@ -108,23 +108,24 @@ We do **not** merge upstream wholesale — this fork has diverged too far
 (removed providers/features, different access model), so clean merges aren't
 expected. `main` is the canonical, deployed, AGPL-published version.
 
-Upstream remains **AGPL-3.0**. This fork is operated as a network service that
-external users can reach, so under **AGPL §13** we publish our complete modified
-source here and link to it from the app footer.
+Like upstream, this fork is **AGPL-3.0**, and we're glad to share our changes
+back as open source. Since WannPassts is reachable by external users over the
+network, the complete modified source lives here and is linked from the app
+footer, in the spirit of AGPL — thanks to the upstream maintainers for building
+a great tool to start from.
 
 ### Support & self-hosting
 
-> **We do not provide any support for self-hosting, deploying, or otherwise
-> running this fork.** It is published solely to meet the AGPL source-availability
-> obligation and is tailored to ScootKit's internal needs (domain-gated sign-in,
-> our legal pages, etc.). It is **not** a general-purpose product
-> (and some features of the upstream have been removed).
+> This repository is shared as open source, but it's tailored to ScootKit's
+> internal setup (domain-gated sign-in, our legal pages, removed integrations,
+> etc.) rather than as a general-purpose product — so we're **not able to offer
+> support** for self-hosting or deploying it.
 >
-> If you want a scheduling tool you can run yourself, please use the original,
-> actively-maintained upstream project instead:
+> If you'd like a scheduling tool you can run yourself, we'd genuinely recommend
+> the original, actively-maintained upstream project:
 > **[schej-it/timeful.app](https://github.com/schej-it/timeful.app)** (or the
-> hosted version at https://timeful.app). Direct self-hosting questions there,
-> not here.
+> hosted version at https://timeful.app) — it's the better starting point, and
+> self-hosting questions are best directed there.
 
 ### Configuration (fork-specific env)
 
