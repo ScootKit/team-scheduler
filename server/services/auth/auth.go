@@ -103,6 +103,13 @@ func VerifyGoogleIdToken(idToken string, allowedAuds []string) (GoogleIdTokenInf
 		return GoogleIdTokenInfo{}, fmt.Errorf("unexpected id token issuer: %s", info.Iss)
 	}
 
+	// Require a Google-verified email. The email-domain allowlist that gates sign-in trusts this
+	// claim to prove the user actually controls a mailbox in an approved domain; without this
+	// check an unverified email in an allowed domain would pass the allowlist.
+	if info.EmailVerified != "true" {
+		return GoogleIdTokenInfo{}, fmt.Errorf("id token email is not verified")
+	}
+
 	return info, nil
 }
 

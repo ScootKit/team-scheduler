@@ -5,16 +5,12 @@
     <div class="tw-w-full tw-max-w-[420px]">
       <!-- Logo -->
       <div class="tw-mb-8 tw-flex tw-justify-center">
-        <router-link :to="{ name: 'landing' }">
-          <v-img
-            alt="Timeful Logo"
-            class="shrink tw-cursor-pointer"
-            contain
-            src="@/assets/timeful_logo_with_text.png"
-            transition="fade-transition"
-            width="160"
-          />
-        </router-link>
+        <div class="tw-flex tw-items-center">
+          <v-icon class="tw-mr-2 tw-text-green" large>mdi-calendar-blank</v-icon>
+          <span class="tw-text-3xl tw-font-medium tw-text-very-dark-gray"
+            >WannPassts?</span
+          >
+        </div>
       </div>
 
       <v-card class="tw-rounded-xl tw-px-2 tw-py-4">
@@ -49,24 +45,6 @@
                   <v-spacer />
                 </div>
               </v-btn>
-              <v-btn
-                block
-                @click="signIn(calendarTypes.OUTLOOK)"
-                class="tw-bg-white"
-              >
-                <div class="tw-flex tw-w-full tw-items-center tw-gap-2">
-                  <v-img
-                    class="tw-flex-initial"
-                    width="20"
-                    height="20"
-                    src="@/assets/outlook_logo.svg"
-                  />
-                  <v-spacer />
-                  {{ isSignUp ? "Sign up with" : "Continue with" }} Outlook
-                  <v-spacer />
-                </div>
-              </v-btn>
-
               <div class="tw-my-2 tw-flex tw-items-center tw-gap-3">
                 <v-divider />
                 <span class="tw-text-xs tw-text-gray">or</span>
@@ -98,14 +76,16 @@
                 </v-btn>
               </div>
             </div>
-            <div class="tw-text-center tw-text-xs">
+            <div v-if="privacyPolicyUrl" class="tw-text-center tw-text-xs">
               By continuing, you agree to our
-              <router-link
+              <a
                 class="tw-text-blue"
-                :to="{ name: 'privacy-policy' }"
+                :href="privacyPolicyUrl"
+                target="_blank"
+                rel="noopener"
               >
                 privacy policy
-              </router-link>
+              </a>
             </div>
           </v-card-text>
         </template>
@@ -250,7 +230,7 @@
 </template>
 
 <script>
-import { authTypes, calendarTypes } from "@/constants"
+import { authTypes, calendarTypes, privacyPolicyUrl } from "@/constants"
 import { post, signInGoogle, signInOutlook } from "@/utils"
 import { mapMutations } from "vuex"
 import Logo from "@/components/Logo.vue"
@@ -264,7 +244,7 @@ export default {
 
   metaInfo() {
     return {
-      title: this.isSignUp ? "Sign Up - Timeful" : "Sign In - Timeful",
+      title: this.isSignUp ? "Sign Up - WannPassts" : "Sign In - WannPassts",
     }
   },
 
@@ -276,6 +256,7 @@ export default {
     upgradeRedirect() {
       return this.$route.query.redirect === "upgrade"
     },
+    privacyPolicyUrl: () => privacyPolicyUrl,
   },
 
   data() {
@@ -332,6 +313,11 @@ export default {
       this.sending = true
       try {
         const res = await post("/auth/otp/check-email", { email: this.email })
+        if (res.allowed === false) {
+          this.emailError =
+            "Sign-in is restricted to approved email domains. Please use your company email."
+          return
+        }
         this.isNewUser = res.isNewUser
         if (this.isNewUser) {
           this.step = "onboarding"

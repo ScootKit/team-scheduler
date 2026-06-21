@@ -335,6 +335,30 @@
                               />
                             </template>
 
+                            <!-- Persisted scheduled event (set by the owner) -->
+                            <template
+                              v-for="scheduledBlock in persistedScheduledEventByDay[
+                                d + page * maxDaysPerPage
+                              ]"
+                            >
+                              <div
+                                :key="`scheduled-${d}-${scheduledBlock.hoursOffset}`"
+                                class="tw-absolute tw-z-10 tw-w-full tw-select-none tw-p-px"
+                                :style="getTimeBlockStyle(scheduledBlock)"
+                                style="pointer-events: none"
+                              >
+                                <div
+                                  class="tw-h-full tw-w-full tw-overflow-hidden tw-text-ellipsis tw-rounded tw-border-2 tw-border-solid tw-border-green tw-bg-pale-green tw-p-px tw-text-xs tw-opacity-90"
+                                >
+                                  <div
+                                    class="tw-truncate tw-font-medium tw-text-dark-green"
+                                  >
+                                    📅 {{ event.name }}
+                                  </div>
+                                </div>
+                              </div>
+                            </template>
+
                             <!-- Scheduled event -->
                             <div v-if="state === states.SCHEDULE_EVENT">
                               <div
@@ -1194,9 +1218,8 @@ export default {
       /* Variables for options */
       curTimezone: this.initialTimezone,
       curScheduledEvent: null, // The scheduled event represented in the form {hoursOffset, hoursLength, dayIndex}
-      timeType:
-        localStorage["timeType"] ??
-        (userPrefers12h() ? timeTypes.HOUR12 : timeTypes.HOUR24), // Whether 12-hour or 24-hour
+      // Default to 24-hour unless the user explicitly chose a format. (WannPassts default.)
+      timeType: localStorage["timeType"] ?? timeTypes.HOUR24, // Whether 12-hour or 24-hour
       showCalendarEvents: false,
       startCalendarOnMonday: prefersStartOnMonday(),
 
@@ -1364,6 +1387,37 @@ export default {
 
       return userIdToEventsByDay
     },
+    /**
+     * Splits the event's PERSISTED scheduled event (set by the owner via the
+     * "Schedule this event" dialog) by day, reusing the same positioning math
+     * as calendar events so it lands on the correct grid cells. Returns [] when
+     * no schedule is set or it falls outside the displayed range.
+     */
+    persistedScheduledEventByDay() {
+      const scheduled = this.event?.scheduledEvent
+      if (!scheduled || !scheduled.startDate) return []
+
+      const start = new Date(scheduled.startDate)
+      if (isNaN(start.getTime())) return []
+
+      let end
+      if (scheduled.endDate) {
+        end = new Date(scheduled.endDate)
+        if (isNaN(end.getTime()) || end <= start) end = null
+      }
+      // Fall back to the event's duration (hours) when no end date is stored
+      if (!end) {
+        const durationHours = Number(this.event?.duration) || 1
+        end = new Date(start.getTime() + durationHours * 60 * 60 * 1000)
+      }
+
+      return splitTimeBlocksByDay(
+        this.event,
+        [{ startDate: start, endDate: end }],
+        this.weekOffset,
+        this.timezoneOffset
+      )
+    },
     curRespondentsSet() {
       return new Set(this.curRespondents)
     },
@@ -1465,9 +1519,9 @@ export default {
           offsetDate.setDate(offsetDate.getDate() + this.dayOffset)
         }
         if (this.isSpecificDates) {
-          dateString = `${
+          dateString = `${offsetDate.getUTCDate()} ${
             this.months[offsetDate.getUTCMonth()]
-          } ${offsetDate.getUTCDate()}`
+          }`
           dayString = this.daysOfWeek[offsetDate.getUTCDay()]
         } else if (this.isGroup || this.isWeekly) {
           const tmpDate = dateToDowDate(
@@ -1477,9 +1531,9 @@ export default {
             true
           )
 
-          dateString = `${
+          dateString = `${tmpDate.getUTCDate()} ${
             this.months[tmpDate.getUTCMonth()]
-          } ${tmpDate.getUTCDate()}`
+          }`
           dayString = this.daysOfWeek[tmpDate.getUTCDay()]
         }
         return { dateString, dayString }
@@ -1694,6 +1748,13 @@ export default {
     },
     isSignUp() {
       return this.event.isSignUpForm
+    },
+    /** Whether the event's response deadline (if any) has passed. Groups are exempt. */
+    responseDeadlinePassed() {
+      if (this.isGroup || !this.event?.responseDeadline) return false
+      const deadline = new Date(this.event.responseDeadline)
+      if (isNaN(deadline.getTime())) return false
+      return deadline <= new Date()
     },
     isSpecificTimes() {
       return this.event.hasSpecificTimes
@@ -2871,6 +2932,9 @@ export default {
           payload.guest = true
           payload.name = guestPayload.name
           payload.email = guestPayload.email
+          // Guests must consent to the privacy policy (recorded server-side).
+          payload.consentedToPrivacyPolicy =
+            guestPayload.consentedToPrivacyPolicy
 
           localStorage[this.guestNameKey] = guestPayload.name
         }
@@ -3480,6 +3544,11 @@ export default {
     //#region Editing
     // -----------------------------------
     startEditing() {
+      // Responses are closed once the deadline has passed; don't enter editing mode
+      if (this.responseDeadlinePassed) {
+        this.showInfo("Responses are closed for this event.")
+        return
+      }
       this.state = this.isSignUp
         ? this.states.EDIT_SIGN_UP_BLOCKS
         : this.states.EDIT_AVAILABILITY
@@ -3626,13 +3695,13 @@ export default {
         url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
           this.event.name
         )}&dates=${start}/${end}&details=${encodeURIComponent(
-          "\n\nThis event was scheduled with Timeful: https://timeful.app/e/"
+          `\n\nThis event was scheduled with WannPassts: ${window.location.origin}/e/`
         )}${eventId}&ctz=${this.curTimezone.value}&add=${emailsString}`
       } else {
         url = `https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(
           this.event.name
         )}&body=${encodeURIComponent(
-          "\n\nThis event was scheduled with Timeful: https://timeful.app/e/" +
+          `\n\nThis event was scheduled with WannPassts: ${window.location.origin}/e/` +
             eventId
         )}&startdt=${startDate.toISOString()}&enddt=${endDate.toISOString()}&location=${encodeURIComponent(
           this.event.location || ""
@@ -3642,6 +3711,14 @@ export default {
       // Navigate to url and reset state
       window.open(url, "_blank")
       this.state = this.defaultState
+
+      // Also surface the WannPassts "Schedule this event" dialog prefilled with the chosen
+      // date/time, so the owner just pastes the Google Meet link and saves (which records the
+      // scheduled event + shows the banner). Only meaningful for the owner.
+      this.$emit("openScheduleDialog", {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      })
     },
     //#endregion
 

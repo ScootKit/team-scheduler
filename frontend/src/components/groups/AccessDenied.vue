@@ -3,7 +3,7 @@
     class="tw-flex tw-h-full tw-flex-col tw-items-center tw-justify-center tw-p-2"
   >
     <v-img
-      alt="schejie sad"
+      alt="sad face"
       src="@/assets/schejie/sad.png"
       transition="fade-transition"
       contain

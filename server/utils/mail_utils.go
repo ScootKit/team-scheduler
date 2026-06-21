@@ -6,20 +6,58 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"gopkg.in/gomail.v2"
 	"schej.it/server/logger"
 )
 
-// Send email to the given email
+// IsEmailConfigured reports whether an SMTP transport (Amazon SES in production, or the Gmail
+// fallback) is configured, so callers can decide whether email can actually be delivered.
+func IsEmailConfigured() bool {
+	return os.Getenv("SMTP_HOST") != "" ||
+		os.Getenv("SMTP_USERNAME") != "" ||
+		os.Getenv("GMAIL_APP_PASSWORD") != ""
+}
+
+// Send email to the given email.
+//
+// Transport is env-configurable so we can point at Amazon SES (or any SMTP relay):
+//   - SMTP_HOST     (default: smtp.gmail.com)
+//   - SMTP_PORT     (default: 587)
+//   - SMTP_USERNAME (default: SCHEJ_EMAIL_ADDRESS)
+//   - SMTP_PASSWORD (default: GMAIL_APP_PASSWORD)
+//   - SMTP_FROM     (default: SCHEJ_EMAIL_ADDRESS)
+//
+// For WannPassts these point at the SES SMTP endpoint + SES SMTP credentials.
 func SendEmail(toEmail string, subject string, body string, contentType string) {
 	if contentType == "" {
 		contentType = "text/plain"
 	}
 
-	appPassword := os.Getenv("GMAIL_APP_PASSWORD")
-	fromEmail := os.Getenv("SCHEJ_EMAIL_ADDRESS")
+	host := os.Getenv("SMTP_HOST")
+	if host == "" {
+		host = "smtp.gmail.com"
+	}
+	port := 587
+	if p := os.Getenv("SMTP_PORT"); p != "" {
+		if parsed, err := strconv.Atoi(p); err == nil {
+			port = parsed
+		}
+	}
+	username := os.Getenv("SMTP_USERNAME")
+	if username == "" {
+		username = os.Getenv("SCHEJ_EMAIL_ADDRESS")
+	}
+	password := os.Getenv("SMTP_PASSWORD")
+	if password == "" {
+		password = os.Getenv("GMAIL_APP_PASSWORD")
+	}
+	fromEmail := os.Getenv("SMTP_FROM")
+	if fromEmail == "" {
+		fromEmail = os.Getenv("SCHEJ_EMAIL_ADDRESS")
+	}
 
 	m := gomail.NewMessage()
 	m.SetHeader("From", fromEmail)
@@ -27,9 +65,8 @@ func SendEmail(toEmail string, subject string, body string, contentType string) 
 	m.SetHeader("Subject", subject)
 	m.SetBody(contentType, body)
 
-	d := gomail.NewDialer("smtp.gmail.com", 587, fromEmail, appPassword)
+	d := gomail.NewDialer(host, port, username, password)
 
-	// Send the email to Bob, Cora and Dan.
 	if err := d.DialAndSend(m); err != nil {
 		logger.StdErr.Println(err)
 	}

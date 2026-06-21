@@ -10,7 +10,7 @@
       <template v-else>
         <div class="tw-flex tw-flex-col tw-items-center tw-gap-4">
           <v-img
-            alt="schejie heart"
+            alt="celebration heart"
             src="@/assets/schejie/heart.png"
             transition="fade-transition"
             contain
@@ -20,7 +20,7 @@
             You've upgraded to <br class="tw-block sm:tw-hidden" />
             <span
               class="tw-bg-gradient-to-r tw-from-darkest-green tw-to-light-green tw-bg-clip-text tw-text-transparent"
-              >Timeful Premium</span
+              >WannPassts Premium</span
             >!
           </div>
           <div>

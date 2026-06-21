@@ -74,7 +74,7 @@ func getProfile(c *gin.Context) {
 func updateName(c *gin.Context) {
 	payload := struct {
 		FirstName string `json:"firstName" binding:"required"`
-		LastName  string `json:"lastName" binding:"required"`
+		LastName  string `json:"lastName"`
 	}{}
 	if err := c.BindJSON(&payload); err != nil {
 		return

@@ -114,15 +114,16 @@ func PrintHttpResponse(resp *http.Response) {
 	resp.Body = io.NopCloser(bytes.NewBuffer(body))
 }
 
-// Returns the correct base url, based on whether we're on dev or prod
+// Returns the correct base url for building user-facing links (OG tags, emails).
+// Configurable via FRONTEND_BASE_URL so this fork points at its own domain instead of timeful.app.
 func GetBaseUrl() string {
-	var baseUrl string
-	if IsRelease() {
-		baseUrl = "https://timeful.app"
-	} else {
-		baseUrl = "http://localhost:8080"
+	if base := strings.TrimSpace(os.Getenv("FRONTEND_BASE_URL")); base != "" {
+		return strings.TrimRight(base, "/")
 	}
-	return baseUrl
+	if IsRelease() {
+		return "https://wannpassts.scootkit.com"
+	}
+	return "http://localhost:8080"
 }
 
 // Returns the value of the first non nil pointer in `args`.
@@ -153,6 +154,30 @@ func FalsePtr() *bool {
 // NormalizeEmail returns the email in a canonical form for lookups and storage (trim + ASCII lower).
 func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// IsApprovedEmailDomain reports whether the given email belongs to one of the domains in the
+// ALLOWED_EMAIL_DOMAINS env var (comma-separated). An empty/unset allowlist permits all domains
+// (convenient for local dev). Used to gate sign-in to company domains.
+func IsApprovedEmailDomain(email string) bool {
+	allowed := strings.TrimSpace(os.Getenv("ALLOWED_EMAIL_DOMAINS"))
+	if allowed == "" {
+		return true
+	}
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return false
+	}
+	domain := strings.ToLower(strings.TrimSpace(email[at+1:]))
+	if domain == "" {
+		return false
+	}
+	for _, d := range strings.Split(allowed, ",") {
+		if domain == strings.ToLower(strings.TrimSpace(d)) {
+			return true
+		}
+	}
+	return false
 }
 
 // GetCalendarAccountKey builds the map key for calendarAccounts. Email-like identifiers are lowercased;

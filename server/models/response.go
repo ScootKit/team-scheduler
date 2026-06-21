@@ -2,6 +2,18 @@ package models
 
 import "go.mongodb.org/mongo-driver/bson/primitive"
 
+// EventTopic is a discussion topic / agenda item suggested by a respondent on an event.
+type EventTopic struct {
+	Id        primitive.ObjectID `json:"id" bson:"_id"`
+	Name      string             `json:"name" bson:"name"`
+	Text      string             `json:"text" bson:"text"`
+	CreatedAt primitive.DateTime `json:"createdAt" bson:"createdAt"`
+}
+
+// CurrentPrivacyPolicyVersion is stamped onto guest responses when they consent to the privacy
+// policy. Bump this when the policy materially changes so old consents can be distinguished.
+const CurrentPrivacyPolicyVersion = "2026-06-21"
+
 type EventResponse struct {
 	Id      primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	EventId primitive.ObjectID `json:"eventId" bson:"eventId"`
@@ -15,6 +27,11 @@ type Response struct {
 	// Guest information
 	Name  string `json:"name" bson:"name,omitempty"`
 	Email string `json:"email" bson:"email,omitempty"`
+
+	// Recorded privacy-policy consent for guest submissions (not set for signed-in users, who
+	// consent at sign-in). Provides provable, versioned consent for GDPR purposes.
+	ConsentedToPrivacyPolicyAt *primitive.DateTime `json:"consentedToPrivacyPolicyAt" bson:"consentedToPrivacyPolicyAt,omitempty"`
+	PrivacyPolicyVersion       string              `json:"privacyPolicyVersion" bson:"privacyPolicyVersion,omitempty"`
 
 	// User information
 	UserId primitive.ObjectID `json:"userId" bson:"userId,omitempty"`

@@ -2,6 +2,11 @@
 export const serverURL =
   process.env.NODE_ENV === "development" ? "http://localhost:3002/api" : "/api"
 
+// Legal links — configured at build time via env so self-hosted mirrors of this fork do NOT
+// surface the original operator's Privacy Policy / Imprint. Links are hidden when unset.
+export const privacyPolicyUrl = process.env.VUE_APP_PRIVACY_POLICY_URL || ""
+export const imprintUrl = process.env.VUE_APP_IMPRINT_URL || ""
+
 // Errors enum
 export const errors = Object.freeze({
   JsonError: "json-error",

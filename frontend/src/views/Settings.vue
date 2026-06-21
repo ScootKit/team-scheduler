@@ -22,7 +22,7 @@
               v-model="lastName"
               hide-details
               outlined
-              placeholder="Last name"
+              placeholder="Last name (optional)"
               :dense="isPhone"
             />
           </div>
@@ -123,26 +123,6 @@
         </div>
       </div>
 
-      <!-- Question Section -->
-      <div class="tw-flex tw-flex-col tw-gap-5">
-        <div
-          class="tw-text-xl tw-font-medium tw-text-dark-green sm:tw-text-2xl"
-        >
-          Have a question?
-        </div>
-        <div class="tw-flex tw-flex-col tw-gap-5 sm:tw-flex-row sm:tw-gap-28">
-          <div class="tw-text-black">
-            Email us at
-            <a
-              href="mailto:contact@timeful.app"
-              class="tw-text-black tw-underline"
-              >contact@timeful.app</a
-            >
-            with any questions!
-          </div>
-        </div>
-      </div>
-
       <!-- Delete Account Section -->
       <div class="tw-mt-28 tw-flex tw-flex-row tw-justify-center">
         <div class="tw-w-64">
@@ -197,7 +177,7 @@ export default {
   name: "Settings",
 
   metaInfo: {
-    title: "Settings - Timeful",
+    title: "Settings - WannPassts",
   },
 
   components: { CalendarAccounts },

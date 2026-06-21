@@ -15,13 +15,81 @@ dayjs.extend(timezonePlugin)
   Date utils 
 */
 
-/** Returns a string representation of the given date, i.e. May 14th is "5/14" */
+/** Returns a human-readable local date + time string for a response deadline,
+ *  e.g. "Mon, May 14, 2025, 11:59 PM". Returns "" for invalid/empty input. */
+export const formatResponseDeadline = (deadline) => {
+  if (!deadline) return ""
+  const date = new Date(deadline)
+  if (isNaN(date.getTime())) return ""
+  return date.toLocaleString(getLocale(), {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
+/** Returns a relative countdown to a future deadline, e.g. "in 5 minutes",
+ *  "in 3 hours", "in 2 days". Returns "soon" when under a minute away, and
+ *  "" when the deadline is in the past or invalid. `nowTs` lets callers drive
+ *  live updates by passing a changing Date.now() value. */
+export const formatTimeUntil = (deadline, nowTs = Date.now()) => {
+  if (!deadline) return ""
+  const target = new Date(deadline).getTime()
+  if (isNaN(target)) return ""
+  const diffMs = target - nowTs
+  if (diffMs <= 0) return ""
+  const mins = Math.round(diffMs / 60000)
+  if (mins < 1) return "soon"
+  if (mins < 60) return `in ${mins} minute${mins === 1 ? "" : "s"}`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `in ${hours} hour${hours === 1 ? "" : "s"}`
+  const days = Math.round(hours / 24)
+  return `in ${days} day${days === 1 ? "" : "s"}`
+}
+
+/** Returns a short relative/absolute label for a timestamp, e.g. "just now",
+ *  "5m ago", "3h ago", "2d ago", or a short date like "May 14" for older dates.
+ *  Returns "" for invalid/empty input. */
+export const formatShortTimeAgo = (date) => {
+  if (!date) return ""
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return ""
+
+  const diffMs = Date.now() - d.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+
+  if (diffMs < 0) {
+    // Future date: just show the short date
+    return d.toLocaleDateString(getLocale(), { month: "short", day: "numeric" })
+  }
+  if (diffMin < 1) return "just now"
+  if (diffMin < 60) return `${diffMin}m ago`
+
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+
+  const diffDay = Math.floor(diffHr / 24)
+  if (diffDay < 7) return `${diffDay}d ago`
+
+  const now = new Date()
+  const opts =
+    d.getFullYear() === now.getFullYear()
+      ? { month: "short", day: "numeric" }
+      : { month: "short", day: "numeric", year: "numeric" }
+  return d.toLocaleDateString(getLocale(), opts)
+}
+
+/** Returns a string representation of the given date in day.month form, i.e. May 14th is "14.5"
+ *  (WannPassts uses European day-first dates). */
 export const getDateString = (date, utc = false) => {
   date = new Date(date)
   if (utc) {
-    return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`
+    return `${date.getUTCDate()}.${date.getUTCMonth() + 1}`
   }
-  return `${date.getMonth() + 1}/${date.getDate()}`
+  return `${date.getDate()}.${date.getMonth() + 1}`
 }
 
 /** Returns a string in the format "Mon, 9/23, 10 AM - 12 PM PDT" given a start date and end date */
@@ -576,9 +644,8 @@ export const userPrefers12h = () => {
 
 /** Returns an array of time options based on whether user prefers 12h or 24h */
 export const getTimeOptions = () => {
-  const prefers12h = !localStorage["timeType"]
-    ? userPrefers12h()
-    : localStorage["timeType"] === timeTypes.HOUR12
+  // Default to 24-hour unless the user explicitly chose 12-hour. (WannPassts default.)
+  const prefers12h = localStorage["timeType"] === timeTypes.HOUR12
 
   const times = []
   if (prefers12h) {

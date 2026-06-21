@@ -198,86 +198,8 @@
           </v-expand-transition>
         </div>
 
-        <v-checkbox
-          v-if="!guestEvent && authUser"
-          v-model="notificationsEnabled"
-          hide-details
-          class="tw-mt-2"
-        >
-          <template v-slot:label>
-            <span class="tw-text-sm tw-text-very-dark-gray"
-              >Email me each time someone joins my event</span
-            >
-          </template>
-        </v-checkbox>
-        <v-checkbox
-          v-else-if="!guestEvent"
-          disabled
-          messages="test"
-          off-icon="mdi-checkbox-blank-off-outline"
-          class="tw-mt-2"
-        >
-          <template v-slot:label>
-            <span class="tw-text-sm"
-              >Email me each time someone joins my event</span
-            >
-          </template>
-          <template v-slot:message="{ key, message }">
-            <div
-              class="tw-pointer-events-auto -tw-mt-1 tw-ml-[32px] tw-text-xs tw-text-dark-gray"
-            >
-              <span class="tw-font-medium tw-text-very-dark-gray"
-                ><a @click="$emit('signIn')">Sign in</a>
-                to use this feature
-              </span>
-            </div>
-          </template>
-        </v-checkbox>
 
         <div class="tw-flex tw-flex-col tw-gap-2">
-          <ExpandableSection
-            v-if="authUser && !guestEvent"
-            label="Email reminders"
-            v-model="showEmailReminders"
-            :auto-scroll="dialog"
-          >
-            <div class="tw-flex tw-flex-col tw-gap-5 tw-pt-2">
-              <EmailInput
-                v-show="authUser"
-                ref="emailInput"
-                @requestContactsAccess="requestContactsAccess"
-                labelColor="tw-text-very-dark-gray"
-                :addedEmails="addedEmails"
-                @update:emails="(newEmails) => (emails = newEmails)"
-              >
-                <template v-slot:header>
-                  <div class="tw-flex tw-gap-1">
-                    <div class="tw-text-very-dark-gray">
-                      Remind people to fill out the event
-                    </div>
-
-                    <v-tooltip
-                      top
-                      content-class="tw-bg-very-dark-gray tw-shadow-lg tw-opacity-100 tw-py-4"
-                    >
-                      <template v-slot:activator="{ on, attrs }">
-                        <v-icon small v-bind="attrs" v-on="on"
-                          >mdi-information-outline
-                        </v-icon>
-                      </template>
-                      <div>
-                        Reminder emails will be sent the day of event
-                        creation,<br />one day after, and three days after. You
-                        will also receive <br />an email when everybody has
-                        filled out the event.
-                      </div>
-                    </v-tooltip>
-                  </div>
-                </template>
-              </EmailInput>
-            </div>
-          </ExpandableSection>
-
           <ExpandableSection
             v-model="showAdvancedOptions"
             label="Advanced options"
@@ -296,42 +218,19 @@
                 ></v-select>
               </div>
               <v-checkbox
-                v-if="authUser && !guestEvent"
-                v-model="collectEmails"
-                hide-details
+                v-model="topicsEnabled"
+                messages="Let respondents suggest discussion topics / agenda items"
               >
                 <template v-slot:label>
                   <span class="tw-text-sm tw-text-black">
-                    Collect respondents' email addresses
+                    Allow respondents to suggest topics
                   </span>
                 </template>
-                <template v-slot:message="{ key, message }">
+                <template v-slot:message="{ message }">
                   <div
                     class="-tw-mt-1 tw-ml-[32px] tw-text-xs tw-text-dark-gray"
                   >
                     {{ message }}
-                  </div>
-                </template>
-              </v-checkbox>
-              <v-checkbox
-                v-else-if="!guestEvent"
-                disabled
-                messages="test"
-                off-icon="mdi-checkbox-blank-off-outline"
-              >
-                <template v-slot:label>
-                  <span class="tw-text-sm"
-                    >Collect respondents' email addresses</span
-                  >
-                </template>
-                <template v-slot:message="{ key, message }">
-                  <div
-                    class="tw-pointer-events-auto -tw-mt-1 tw-ml-[32px] tw-text-xs tw-text-dark-gray"
-                  >
-                    <span class="tw-font-medium tw-text-very-dark-gray"
-                      ><a @click="$emit('signIn')">Sign in</a>
-                      to use this feature
-                    </span>
                   </div>
                 </template>
               </v-checkbox>
@@ -376,42 +275,60 @@
                   </div>
                 </template>
               </v-checkbox>
-              <v-checkbox
-                v-if="authUser && !guestEvent"
-                v-model="sendEmailAfterXResponsesEnabled"
-                hide-details
-              >
-                <template v-slot:label>
-                  <div
-                    :class="!sendEmailAfterXResponsesEnabled && 'tw-opacity-50'"
-                    class="tw-flex tw-items-center tw-gap-x-2 tw-text-sm tw-text-very-dark-gray"
-                  >
-                    <div>Email me after</div>
-                    <v-text-field
-                      v-model="sendEmailAfterXResponses"
-                      @click="
-                        (e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                        }
-                      "
-                      :disabled="!sendEmailAfterXResponsesEnabled"
-                      dense
-                      class="email-me-after-text-field -tw-mt-[2px] tw-w-10"
-                      menu-props="auto"
-                      hide-details
-                      type="number"
-                      min="1"
-                    ></v-text-field>
-                    <div>responses</div>
-                  </div>
-                </template>
-              </v-checkbox>
               <TimezoneSelector
                 v-model="timezone"
                 label="Timezone"
                 @input="trackTimezoneChange"
               />
+
+              <div>
+                <div class="tw-mb-2 tw-text-sm tw-text-black">
+                  Response deadline
+                </div>
+                <div class="tw-mb-2 tw-text-xs tw-text-dark-gray">
+                  Optionally close responses after a certain date and time
+                </div>
+                <div class="tw-flex tw-items-center tw-gap-2">
+                  <v-menu
+                    v-model="deadlineDateMenu"
+                    :close-on-content-click="false"
+                    transition="scale-transition"
+                    offset-y
+                    min-width="auto"
+                  >
+                    <template v-slot:activator="{ on, attrs }">
+                      <v-text-field
+                        :value="responseDeadlineDate"
+                        label="Date"
+                        prepend-inner-icon="mdi-calendar"
+                        readonly
+                        dense
+                        hide-details
+                        solo
+                        clearable
+                        v-bind="attrs"
+                        v-on="on"
+                        @click:clear="clearResponseDeadline"
+                      />
+                    </template>
+                    <v-date-picker
+                      v-model="responseDeadlineDate"
+                      :min="minCalendarDate"
+                      @input="deadlineDateMenu = false"
+                    />
+                  </v-menu>
+                  <v-text-field
+                    v-model="responseDeadlineTime"
+                    type="time"
+                    label="Time"
+                    prepend-inner-icon="mdi-clock-outline"
+                    dense
+                    hide-details
+                    solo
+                    :disabled="!responseDeadlineDate"
+                  />
+                </div>
+              </div>
             </div>
           </ExpandableSection>
         </div>
@@ -521,7 +438,7 @@ export default {
     selectedDays: [],
     selectedDaysOfWeek: [],
     startOnMonday: prefersStartOnMonday(),
-    notificationsEnabled: true,
+    notificationsEnabled: false,
 
     daysOnly: false,
     daysOnlyOptions: Object.freeze([
@@ -544,10 +461,18 @@ export default {
     showAdvancedOptions: false,
     timeIncrement: 15,
     collectEmails: false,
+    topicsEnabled: true,
     blindAvailabilityEnabled: false,
     timezone: {},
     sendEmailAfterXResponsesEnabled: false,
     sendEmailAfterXResponses: 3,
+
+    // Response deadline (optional). Stored as separate date / time strings
+    // (YYYY-MM-DD and HH:mm) for the pickers; combined into an ISO string on submit.
+    responseDeadlineDate: null,
+    responseDeadlineTime: "23:59",
+    deadlineDateMenu: false,
+    deadlineTimeMenu: false,
 
     helpDialog: false,
 
@@ -627,12 +552,24 @@ export default {
         { text: "60 min", value: 60 },
       ]
     },
+    /** Combined response deadline as an ISO string, or null when unset */
+    responseDeadline() {
+      if (!this.responseDeadlineDate) return null
+      const time = this.responseDeadlineTime || "23:59"
+      const d = new Date(`${this.responseDeadlineDate}T${time}`)
+      if (isNaN(d.getTime())) return null
+      return d.toISOString()
+    },
   },
 
   methods: {
     ...mapActions(["showError", "setEventFolder"]),
     blurNameField() {
       this.$refs["name-field"].blur()
+    },
+    clearResponseDeadline() {
+      this.responseDeadlineDate = null
+      this.responseDeadlineTime = "23:59"
     },
     reset() {
       this.name = ""
@@ -641,7 +578,7 @@ export default {
       this.specificTimesEnabled = false
       this.selectedDays = []
       this.selectedDaysOfWeek = []
-      this.notificationsEnabled = true
+      this.notificationsEnabled = false
       this.daysOnly = false
       this.selectedDateOption = "Specific dates"
       this.emails = []
@@ -650,7 +587,9 @@ export default {
       this.sendEmailAfterXResponsesEnabled = false
       this.sendEmailAfterXResponses = 3
       this.collectEmails = false
+      this.topicsEnabled = true
       this.startOnMonday = prefersStartOnMonday()
+      this.clearResponseDeadline()
 
       this.$refs.form.resetValidation()
     },
@@ -732,8 +671,10 @@ export default {
           ? parseInt(this.sendEmailAfterXResponses)
           : -1,
         collectEmails: this.collectEmails,
+        topicsEnabled: this.topicsEnabled,
         startOnMonday: this.startOnMonday,
         timeIncrement: this.timeIncrement,
+        responseDeadline: this.responseDeadline,
         creatorPosthogId: this.$posthog?.get_distinct_id(),
       }
 
@@ -878,7 +819,24 @@ export default {
         this.specificTimesEnabled = this.event.hasSpecificTimes
         this.startOnMonday = this.event.startOnMonday
         this.collectEmails = this.event.collectEmails
+        this.topicsEnabled = this.event.topicsEnabled !== false
         this.timeIncrement = this.event.timeIncrement ?? 15
+
+        // Initialize response deadline from the existing event (if set)
+        if (this.event.responseDeadline) {
+          const deadline = new Date(this.event.responseDeadline)
+          if (!isNaN(deadline.getTime())) {
+            const pad = (n) => String(n).padStart(2, "0")
+            this.responseDeadlineDate = `${deadline.getFullYear()}-${pad(
+              deadline.getMonth() + 1
+            )}-${pad(deadline.getDate())}`
+            this.responseDeadlineTime = `${pad(deadline.getHours())}:${pad(
+              deadline.getMinutes()
+            )}`
+          }
+        } else {
+          this.clearResponseDeadline()
+        }
 
         if (
           this.event.sendEmailAfterXResponses !== null &&

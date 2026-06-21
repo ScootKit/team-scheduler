@@ -2,6 +2,7 @@ package calendar
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,12 @@ import (
 	"schej.it/server/models"
 	"schej.it/server/utils"
 )
+
+// maxICSFeedBytes caps how much of a user-supplied ICS feed we will read. Without this, a malicious
+// feed can drive unbounded memory use, or deeply-nested BEGIN blocks that make the go-ical decoder
+// recurse until the process hits a fatal (unrecoverable) stack overflow. A few MB is plenty for a
+// real calendar feed; capping the input bounds both DoS vectors.
+const maxICSFeedBytes = 8 << 20 // 8 MiB
 
 type ICSCalendar struct {
 	models.ICSCalendarAuth
@@ -26,8 +33,10 @@ func (cal *ICSCalendar) GetCalendarList() (map[string]models.SubCalendar, error)
 }
 
 func (cal *ICSCalendar) GetCalendarEvents(calendarId string, timeMin time.Time, timeMax time.Time) ([]models.CalendarEvent, error) {
-	// Fetch the data and ensure the fetch was successful
-	resp, err := http.Get(cal.FeedURL)
+	// Fetch the data and ensure the fetch was successful. The feed URL is
+	// user-supplied, so we use the SSRF-safe client (see safe_http.go) to keep
+	// the request from reaching internal/metadata addresses.
+	resp, err := safeGet(cal.FeedURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ICS feed: %v", err)
 	}
@@ -37,8 +46,9 @@ func (cal *ICSCalendar) GetCalendarEvents(calendarId string, timeMin time.Time, 
 		return nil, fmt.Errorf("ICS feed returned status %d", resp.StatusCode)
 	}
 
-	// Parse
-	decoder := ical.NewDecoder(resp.Body)
+	// Parse, but bound how much we read so a hostile feed can't exhaust memory or recurse the
+	// decoder into a fatal stack overflow.
+	decoder := ical.NewDecoder(io.LimitReader(resp.Body, maxICSFeedBytes))
 	parsedCal, err := decoder.Decode()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ICS data: %v", err)
@@ -66,8 +76,14 @@ func (cal *ICSCalendar) GetCalendarEvents(calendarId string, timeMin time.Time, 
 
 		// Check that event is not all day
 		if !strings.Contains(dtStart.Value, "T") {
-			startTime, _ = time.Parse("20060102", dtStart.Value)
-			endTime, _ = time.Parse("20060102", dtEnd.Value)
+			startTime, err = time.Parse("20060102", dtStart.Value)
+			if err != nil {
+				continue
+			}
+			endTime, err = time.Parse("20060102", dtEnd.Value)
+			if err != nil {
+				continue
+			}
 			allDay = true
 		} else {
 			startTime, err = parseTimeWithTZ(dtStart)

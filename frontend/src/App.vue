@@ -20,7 +20,6 @@
       :value="upgradeDialogVisible"
       @input="handleUpgradeDialogInput"
     />
-    <UpvoteRedditSnackbar />
     <div
       v-if="showHeader"
       class="tw-fixed tw-z-40 tw-h-14 tw-w-screen tw-bg-white sm:tw-h-16"
@@ -32,14 +31,6 @@
         <router-link :to="{ name: 'home' }">
           <Logo type="timeful" />
         </router-link>
-        <v-expand-x-transition>
-          <span
-            v-if="isPremiumUser"
-            class="tw-ml-2 tw-cursor-default tw-rounded-md tw-bg-[linear-gradient(-25deg,#0a483d,#00994c,#126045,#0a483d)] tw-px-2 tw-py-1 tw-text-sm tw-font-semibold tw-text-white tw-opacity-80"
-          >
-            Premium
-          </span>
-        </v-expand-x-transition>
 
         <v-spacer />
 
@@ -50,16 +41,6 @@
           @click="() => _createNew(true)"
         >
           Create an event
-        </v-btn>
-        <v-btn
-          v-if="showFeedbackBtn"
-          id="feedback-btn"
-          text
-          href="https://forms.gle/A96i4TTWeKgH3P1W6"
-          target="_blank"
-          @click="trackFeedbackClick"
-        >
-          Give feedback
         </v-btn>
         <!-- <v-btn
           v-if="!isPhone"
@@ -97,6 +78,7 @@
         >
           <router-view v-if="loaded" :key="$route.fullPath" />
         </div>
+        <Footer />
       </div>
     </v-main>
   </v-app>
@@ -249,8 +231,8 @@ import {
 import AutoSnackbar from "@/components/AutoSnackbar"
 import AuthUserMenu from "@/components/AuthUserMenu.vue"
 import SignInNotSupportedDialog from "@/components/SignInNotSupportedDialog.vue"
-import UpvoteRedditSnackbar from "@/components/UpvoteRedditSnackbar.vue"
 import Logo from "@/components/Logo.vue"
+import Footer from "@/components/Footer.vue"
 import isWebview from "is-ua-webview"
 import NewDialog from "./components/NewDialog.vue"
 import UpgradeDialog from "@/components/pricing/UpgradeDialog.vue"
@@ -271,8 +253,8 @@ export default {
     AuthUserMenu,
     SignInNotSupportedDialog,
     NewDialog,
-    UpvoteRedditSnackbar,
     Logo,
+    Footer,
     UpgradeDialog,
     SignInDialog,
     DiscordBanner,
@@ -307,9 +289,6 @@ export default {
         this.$route.name !== "sign-up" &&
         this.$route.name !== "privacy-policy"
       )
-    },
-    showFeedbackBtn() {
-      return !this.isPhone || this.$route.name === "home"
     },
     routerViewClass() {
       let c = ""
@@ -415,9 +394,6 @@ export default {
       // )
       // this.setEnablePaywall(this.$posthog.isFeatureEnabled("enable-paywall"))
       this.setFeatureFlagsLoaded(true)
-    },
-    trackFeedbackClick() {
-      this.$posthog.capture("give_feedback_button_clicked")
     },
     handleUpgradeDialogInput(value) {
       if (!value) {

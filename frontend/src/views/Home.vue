@@ -1,11 +1,16 @@
 <template>
   <span>
-    <FormerlyKnownAs
-      class="tw-mx-auto tw-mb-10 tw-mt-3 tw-max-w-6xl tw-pl-4 sm:tw-pl-12"
-    />
     <div
       class="tw-mx-auto tw-mb-24 tw-mt-4 tw-max-w-6xl tw-space-y-4 sm:tw-mb-12 sm:tw-mt-7"
     >
+      <v-alert type="info" text dense class="tw-mt-3 tw-text-sm">
+        <strong
+          >WannPassts is for meetings with at least one external
+          participant.</strong
+        >
+        For internal, employee-to-employee scheduling, use your Google Calendar
+        tools (e.g. "Find a time" / suggested times) instead.
+      </v-alert>
       <!-- Preload images -->
       <div class="tw-hidden">
         <img src="@/assets/doodles/boba/0.jpg" alt="preload" />
@@ -32,46 +37,6 @@
       <v-fade-transition>
         <Dashboard v-if="!loading || eventsNotEmpty" />
       </v-fade-transition>
-
-      <div
-        class="tw-rounded-md tw-px-6 tw-py-4 sm:tw-mx-4 sm:tw-bg-[#f3f3f366]"
-        v-if="!loading || eventsNotEmpty"
-      >
-        <div
-          class="tw-mb-3 tw-text-xl tw-font-medium tw-text-dark-green sm:tw-text-2xl"
-        >
-          Tools
-        </div>
-        <div class="tw-flex tw-flex-row tw-items-center tw-gap-2">
-          <div
-            @click="convertW2M"
-            class="tw-cursor-pointer tw-text-sm tw-font-normal tw-text-dark-gray tw-underline"
-          >
-            Convert When2meet to Timeful
-          </div>
-          <div
-            @click="importTimeful"
-            class="tw-cursor-pointer tw-text-sm tw-font-normal tw-text-dark-gray tw-underline"
-          >
-            Import Timeful Event
-          </div>
-        </div>
-      </div>
-
-      <div v-if="!loading || eventsNotEmpty" class="tw-flex tw-justify-center">
-        <div
-          class="animate-boba tw-size-48 tw-bg-contain tw-bg-no-repeat sm:tw-size-48"
-        ></div>
-      </div>
-
-      <div class="tw-flex tw-flex-col tw-items-center tw-justify-between">
-        <router-link
-          class="tw-text-xs tw-font-medium tw-text-gray"
-          :to="{ name: 'privacy-policy' }"
-        >
-          Privacy Policy
-        </router-link>
-      </div>
 
       <!-- FAB -->
       <BottomFab
@@ -101,13 +66,12 @@ import Dashboard from "@/components/home/Dashboard.vue"
 import { mapState, mapActions, mapMutations } from "vuex"
 import { eventTypes } from "@/constants"
 import { isPhone, get } from "@/utils"
-import FormerlyKnownAs from "@/components/FormerlyKnownAs.vue"
 
 export default {
   name: "Home",
 
   metaInfo: {
-    title: "Home - Timeful",
+    title: "Home - WannPassts",
   },
 
   components: {
@@ -117,7 +81,6 @@ export default {
     When2meetImportDialog,
     TimefulImportDialog,
     Dashboard,
-    FormerlyKnownAs,
   },
 
   props: {

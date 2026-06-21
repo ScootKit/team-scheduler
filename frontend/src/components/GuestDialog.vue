@@ -41,16 +41,44 @@
             persistent-hint
             solo
           ></v-text-field>
+          <v-checkbox
+            v-model="consent"
+            :rules="consentRules"
+            hide-details="auto"
+            class="tw-mt-0 tw-pt-0"
+          >
+            <template #label>
+              <span class="tw-text-sm">
+                I agree to the
+                <a
+                  v-if="privacyPolicyUrl"
+                  :href="privacyPolicyUrl"
+                  target="_blank"
+                  rel="noopener"
+                  @click.stop
+                  >Privacy Policy</a
+                >
+                <template v-else>Privacy Policy</template>
+              </span>
+            </template>
+          </v-checkbox>
           <div class="tw-flex">
             <v-spacer />
             <v-btn
               @click="submit"
               class="tw-bg-green"
-              :dark="formValid"
-              :disabled="!formValid"
+              :dark="formValid && consent"
+              :disabled="!formValid || !consent"
             >
               Continue
             </v-btn>
+          </div>
+          <div class="tw-mt-1 tw-text-center tw-text-xs tw-text-dark-gray">
+            ScootKit employee or helper?
+            <router-link :to="{ name: 'sign-in' }" class="tw-text-blue">
+              Sign in to your account
+            </router-link>
+            instead.
           </div>
         </v-form>
       </v-card-text>
@@ -60,6 +88,7 @@
 
 <script>
 import { isPhone, validateEmail } from "@/utils"
+import { privacyPolicyUrl } from "@/constants"
 
 export default {
   name: "GuestDialog",
@@ -77,8 +106,10 @@ export default {
       formValid: false,
       name: "",
       email: "",
+      consent: false,
       nameRules: [],
       emailRules: [],
+      consentRules: [],
     }
   },
 
@@ -86,6 +117,7 @@ export default {
     isPhone() {
       return isPhone(this.$vuetify)
     },
+    privacyPolicyUrl: () => privacyPolicyUrl,
   },
 
   methods: {
@@ -99,11 +131,18 @@ export default {
         (email) => !!email || "Email is required",
         (email) => !!validateEmail(email) || "Invalid email",
       ]
+      this.consentRules = [
+        (consent) => !!consent || "You must agree to the Privacy Policy",
+      ]
 
       this.$nextTick(() => {
         if (!this.$refs.form.validate()) return
 
-        this.$emit("submit", { name: this.name, email: this.email })
+        this.$emit("submit", {
+          name: this.name,
+          email: this.email,
+          consentedToPrivacyPolicy: this.consent,
+        })
       })
     },
   },
@@ -113,8 +152,10 @@ export default {
       if (this.value) {
         this.name = ""
         this.email = ""
+        this.consent = false
         this.nameRules = []
         this.emailRules = []
+        this.consentRules = []
 
         this.$refs.form?.resetValidation()
       }

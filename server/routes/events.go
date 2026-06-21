@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"schej.it/server/db"
 	"schej.it/server/errs"
 	"schej.it/server/logger"
@@ -31,14 +32,16 @@ import (
 func InitEvents(router *gin.RouterGroup) {
 	eventRouter := router.Group("/events")
 
-	eventRouter.POST("", createEvent)
+	eventRouter.POST("", middleware.AuthRequired(), createEvent)
 	eventRouter.POST("/import", middleware.AuthRequired(), importEvent)
-	eventRouter.PUT("/:eventId", editEvent)
+	eventRouter.PUT("/:eventId", middleware.AuthRequired(), editEvent)
 	eventRouter.GET("/:eventId/ids", getEventIds)
 	eventRouter.GET("/:eventId", getEvent)
 	eventRouter.GET("/:eventId/responses", getResponses)
 	eventRouter.POST("/:eventId/response", updateEventResponse)
 	eventRouter.DELETE("/:eventId/response", deleteEventResponse)
+	eventRouter.POST("/:eventId/topics", addEventTopic)
+	eventRouter.POST("/:eventId/schedule", middleware.AuthRequired(), setScheduledEvent)
 	eventRouter.POST("/:eventId/rename-user", renameUser)
 	eventRouter.POST("/:eventId/responded", userResponded)
 	eventRouter.POST("/:eventId/decline", middleware.AuthRequired(), declineInvite)
@@ -75,15 +78,17 @@ func createEvent(c *gin.Context) {
 		SignUpBlocks *[]models.SignUpBlock `json:"signUpBlocks"`
 
 		// Only for events (not groups)
-		StartOnMonday            *bool    `json:"startOnMonday"`
-		NotificationsEnabled     *bool    `json:"notificationsEnabled"`
-		BlindAvailabilityEnabled *bool    `json:"blindAvailabilityEnabled"`
-		DaysOnly                 *bool    `json:"daysOnly"`
-		Remindees                []string `json:"remindees"`
-		SendEmailAfterXResponses *int     `json:"sendEmailAfterXResponses"`
-		When2meetHref            *string  `json:"when2meetHref"`
-		CollectEmails            *bool    `json:"collectEmails"`
-		TimeIncrement            *int     `json:"timeIncrement"`
+		StartOnMonday            *bool               `json:"startOnMonday"`
+		NotificationsEnabled     *bool               `json:"notificationsEnabled"`
+		BlindAvailabilityEnabled *bool               `json:"blindAvailabilityEnabled"`
+		DaysOnly                 *bool               `json:"daysOnly"`
+		Remindees                []string            `json:"remindees"`
+		SendEmailAfterXResponses *int                `json:"sendEmailAfterXResponses"`
+		When2meetHref            *string             `json:"when2meetHref"`
+		CollectEmails            *bool               `json:"collectEmails"`
+		TimeIncrement            *int                `json:"timeIncrement"`
+		ResponseDeadline         *primitive.DateTime `json:"responseDeadline"`
+		TopicsEnabled            *bool               `json:"topicsEnabled"`
 
 		// Only for availability groups
 		Attendees []string `json:"attendees"`
@@ -132,6 +137,8 @@ func createEvent(c *gin.Context) {
 		When2meetHref:            payload.When2meetHref,
 		CollectEmails:            payload.CollectEmails,
 		TimeIncrement:            payload.TimeIncrement,
+		ResponseDeadline:         payload.ResponseDeadline,
+		TopicsEnabled:            payload.TopicsEnabled,
 		Type:                     payload.Type,
 		SignUpResponses:          make(map[string]*models.SignUpResponse),
 		NumResponses:             &numResponses,
@@ -265,13 +272,15 @@ func editEvent(c *gin.Context) {
 		SignUpBlocks *[]models.SignUpBlock `json:"signUpBlocks"`
 
 		// Only for events (not groups)
-		StartOnMonday            *bool    `json:"startOnMonday"`
-		NotificationsEnabled     *bool    `json:"notificationsEnabled"`
-		BlindAvailabilityEnabled *bool    `json:"blindAvailabilityEnabled"`
-		DaysOnly                 *bool    `json:"daysOnly"`
-		Remindees                []string `json:"remindees"`
-		SendEmailAfterXResponses *int     `json:"sendEmailAfterXResponses"`
-		CollectEmails            *bool    `json:"collectEmails"`
+		StartOnMonday            *bool               `json:"startOnMonday"`
+		NotificationsEnabled     *bool               `json:"notificationsEnabled"`
+		BlindAvailabilityEnabled *bool               `json:"blindAvailabilityEnabled"`
+		DaysOnly                 *bool               `json:"daysOnly"`
+		Remindees                []string            `json:"remindees"`
+		SendEmailAfterXResponses *int                `json:"sendEmailAfterXResponses"`
+		CollectEmails            *bool               `json:"collectEmails"`
+		ResponseDeadline         *primitive.DateTime `json:"responseDeadline"`
+		TopicsEnabled            *bool               `json:"topicsEnabled"`
 
 		// Only for availability groups
 		Attendees []string `json:"attendees"`
@@ -321,6 +330,8 @@ func editEvent(c *gin.Context) {
 	event.DaysOnly = payload.DaysOnly
 	event.SendEmailAfterXResponses = payload.SendEmailAfterXResponses
 	event.CollectEmails = payload.CollectEmails
+	event.ResponseDeadline = payload.ResponseDeadline
+	event.TopicsEnabled = payload.TopicsEnabled
 	event.Type = payload.Type
 
 	// Update remindees
@@ -335,7 +346,11 @@ func editEvent(c *gin.Context) {
 			ownerName = "Somebody"
 		} else {
 			owner := db.GetUserById(event.OwnerId.Hex())
-			ownerName = owner.FirstName
+			if owner != nil {
+				ownerName = owner.FirstName
+			} else {
+				ownerName = "Somebody"
+			}
 		}
 
 		for _, keptEmail := range kept {
@@ -372,7 +387,11 @@ func editEvent(c *gin.Context) {
 		var owner *models.User
 		if event.OwnerId != primitive.NilObjectID {
 			owner = db.GetUserById(event.OwnerId.Hex())
-			ownerName = owner.FirstName
+			if owner != nil {
+				ownerName = owner.FirstName
+			} else {
+				ownerName = "Somebody"
+			}
 		} else {
 			ownerName = "Somebody"
 		}
@@ -795,6 +814,9 @@ func updateEventResponse(c *gin.Context) {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 
+		// Privacy-policy consent (required for guest submissions; ignored for signed-in users)
+		ConsentedToPrivacyPolicy *bool `json:"consentedToPrivacyPolicy"`
+
 		// Calendar availability variables for Availability Groups feature
 		UseCalendarAvailability *bool                                        `json:"useCalendarAvailability"`
 		EnabledCalendars        *map[string][]string                         `json:"enabledCalendars"`
@@ -812,6 +834,12 @@ func updateEventResponse(c *gin.Context) {
 	event := db.GetEventByEitherId(eventId)
 	if event == nil {
 		c.JSON(http.StatusNotFound, responses.Error{Error: errs.EventNotFound})
+		return
+	}
+
+	// Enforce the response deadline: once it has passed, nobody can submit or edit availability.
+	if event.ResponseDeadline != nil && time.Now().After(event.ResponseDeadline.Time()) {
+		c.JSON(http.StatusForbidden, responses.Error{Error: errs.ResponseDeadlinePassed})
 		return
 	}
 
@@ -842,13 +870,24 @@ func updateEventResponse(c *gin.Context) {
 		// Populate response differently if guest vs signed in user
 		var response models.Response
 		if *payload.Guest {
+			// Guests must consent to the privacy policy before submitting availability. Record the
+			// consent (timestamp + policy version) for provable, versioned GDPR consent.
+			if !utils.Coalesce(payload.ConsentedToPrivacyPolicy) {
+				c.JSON(http.StatusBadRequest, responses.Error{Error: errs.PrivacyConsentRequired})
+				c.Abort()
+				return
+			}
+			consentedAt := primitive.NewDateTimeFromTime(time.Now())
+
 			userIdString = payload.Name
 
 			response = models.Response{
-				Name:         payload.Name,
-				Email:        payload.Email,
-				Availability: payload.Availability,
-				IfNeeded:     payload.IfNeeded,
+				Name:                       payload.Name,
+				Email:                      payload.Email,
+				Availability:               payload.Availability,
+				IfNeeded:                   payload.IfNeeded,
+				ConsentedToPrivacyPolicyAt: &consentedAt,
+				PrivacyPolicyVersion:       models.CurrentPrivacyPolicyVersion,
 			}
 		} else {
 			userIdInterface := session.Get("userId")
@@ -1000,6 +1039,9 @@ func updateEventResponse(c *gin.Context) {
 				respondentName = payload.Name
 			} else {
 				respondent := db.GetUserById(userIdString)
+				if respondent == nil {
+					return
+				}
 				respondentName = fmt.Sprintf("%s %s", respondent.FirstName, respondent.LastName)
 			}
 
@@ -1169,6 +1211,155 @@ func deleteEventResponse(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{})
 }
 
+// @Summary Suggest a topic for an event
+// @Description Adds a respondent-suggested discussion topic/agenda item to the event
+// @Tags events
+// @Accept json
+// @Produce json
+// @Param eventId path string true "Event ID"
+// @Param payload body object{name=string,text=string} true "Topic author name and text"
+// @Success 200 {object} models.EventTopic
+// @Router /events/{eventId}/topics [post]
+func addEventTopic(c *gin.Context) {
+	payload := struct {
+		Name string `json:"name"`
+		Text string `json:"text" binding:"required"`
+	}{}
+	if err := c.BindJSON(&payload); err != nil {
+		return
+	}
+
+	text := strings.TrimSpace(payload.Text)
+	name := strings.TrimSpace(payload.Name)
+	if len(text) == 0 {
+		c.JSON(http.StatusBadRequest, responses.Error{Error: "topic-text-required"})
+		return
+	}
+	// Keep topics short and sane.
+	if len(text) > 500 {
+		text = text[:500]
+	}
+	if len(name) > 100 {
+		name = name[:100]
+	}
+
+	eventId := c.Param("eventId")
+	event := db.GetEventByEitherId(eventId)
+	if event == nil {
+		c.JSON(http.StatusNotFound, responses.Error{Error: errs.EventNotFound})
+		return
+	}
+
+	// Respect the creator's choice to disable topic suggestions (nil = enabled by default).
+	if event.TopicsEnabled != nil && !*event.TopicsEnabled {
+		c.JSON(http.StatusForbidden, responses.Error{Error: "topics-disabled"})
+		return
+	}
+
+	// Respect the response deadline: once responses are closed, no new topics either.
+	if event.ResponseDeadline != nil && time.Now().After(event.ResponseDeadline.Time()) {
+		c.JSON(http.StatusForbidden, responses.Error{Error: errs.ResponseDeadlinePassed})
+		return
+	}
+
+	// Cap topics per event. This endpoint is unauthenticated, so without a ceiling an attacker
+	// could $push unbounded topics and grow the event document toward Mongo's 16MB limit (DoS).
+	const maxTopicsPerEvent = 200
+	if len(event.Topics) >= maxTopicsPerEvent {
+		c.JSON(http.StatusForbidden, responses.Error{Error: "topic-limit-reached"})
+		return
+	}
+
+	topic := models.EventTopic{
+		Id:        primitive.NewObjectID(),
+		Name:      name,
+		Text:      text,
+		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
+	}
+
+	if _, err := db.EventsCollection.UpdateOne(
+		context.Background(),
+		bson.M{"_id": event.Id},
+		bson.M{"$push": bson.M{"topics": topic}},
+	); err != nil {
+		logger.StdErr.Println(err)
+		c.JSON(http.StatusInternalServerError, responses.Error{Error: "failed-to-add-topic"})
+		return
+	}
+
+	c.JSON(http.StatusOK, topic)
+}
+
+// @Summary Set or clear the scheduled time for an event
+// @Description Owner-only. Sets the final scheduled date/time and an optional meeting link (e.g. a
+// Google Meet URL), or clears it when clear=true / no startDate is given.
+// @Tags events
+// @Accept json
+// @Produce json
+// @Param eventId path string true "Event ID"
+// @Param payload body object{startDate=string,endDate=string,meetingLink=string,clear=bool} true "Scheduled event details"
+// @Success 200
+// @Router /events/{eventId}/schedule [post]
+func setScheduledEvent(c *gin.Context) {
+	payload := struct {
+		StartDate   *primitive.DateTime `json:"startDate"`
+		EndDate     *primitive.DateTime `json:"endDate"`
+		MeetingLink string              `json:"meetingLink"`
+		Clear       bool                `json:"clear"`
+	}{}
+	if err := c.BindJSON(&payload); err != nil {
+		return
+	}
+
+	eventId := c.Param("eventId")
+	event := db.GetEventByEitherId(eventId)
+	if event == nil {
+		c.JSON(http.StatusNotFound, responses.Error{Error: errs.EventNotFound})
+		return
+	}
+
+	// Owner-only.
+	session := sessions.Default(c)
+	userId, _ := session.Get("userId").(string)
+	ownerId := utils.StringToObjectID(userId)
+	if event.OwnerId == primitive.NilObjectID || event.OwnerId != ownerId {
+		c.JSON(http.StatusForbidden, responses.Error{Error: errs.UserNotEventOwner})
+		return
+	}
+
+	var update bson.M
+	if payload.Clear || payload.StartDate == nil {
+		update = bson.M{"$unset": bson.M{"scheduledEvent": "", "meetingLink": ""}}
+	} else {
+		// Only allow http(s) links so the value can be safely rendered as an href.
+		link := strings.TrimSpace(payload.MeetingLink)
+		if link != "" && !strings.HasPrefix(link, "http://") && !strings.HasPrefix(link, "https://") {
+			c.JSON(http.StatusBadRequest, responses.Error{Error: "invalid-meeting-link"})
+			return
+		}
+
+		scheduled := models.CalendarEvent{
+			Summary:   event.Name,
+			StartDate: *payload.StartDate,
+		}
+		if payload.EndDate != nil {
+			scheduled.EndDate = *payload.EndDate
+		}
+		update = bson.M{"$set": bson.M{
+			"scheduledEvent": scheduled,
+			"meetingLink":    link,
+		}}
+	}
+
+	if _, err := db.EventsCollection.UpdateOne(context.Background(), bson.M{"_id": event.Id}, update); err != nil {
+		logger.StdErr.Println(err)
+		c.JSON(http.StatusInternalServerError, responses.Error{Error: "failed-to-schedule"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{})
+}
+
 // @Summary Rename a guest response
 // @Tags events
 // @Accept json
@@ -1271,6 +1462,10 @@ func userResponded(c *gin.Context) {
 	if everyoneResponded {
 		// Get owner
 		owner := db.GetUserById(event.OwnerId.Hex())
+		if owner == nil {
+			c.JSON(http.StatusOK, gin.H{})
+			return
+		}
 
 		// Get event url
 		baseUrl := utils.GetBaseUrl()
@@ -1318,10 +1513,13 @@ func declineInvite(c *gin.Context) {
 		"email":   user.Email,
 		"eventId": event.Id,
 	})
-	if attendee == nil {
+	if attendee.Err() == mongo.ErrNoDocuments {
 		// User not in attendees array
 		c.JSON(http.StatusNotFound, responses.Error{Error: errs.AttendeeEmailNotFound})
 		return
+	}
+	if attendee.Err() != nil {
+		logger.StdErr.Panicln(attendee.Err())
 	}
 
 	// Decline invite
@@ -1391,11 +1589,18 @@ func getCalendarAvailabilities(c *gin.Context) {
 				}
 
 				// Fetch calendar events
-				go func(userId string) {
+				go func(userId string, user *models.User, enabledAccounts []string) {
 					// Recover from panics
 					defer func() {
 						if err := recover(); err != nil {
 							logger.StdErr.Println(err)
+							calendarEventsChan <- struct {
+								UserId string
+								Events map[string]calendar.CalendarEventsWithError
+							}{
+								UserId: userId,
+								Events: make(map[string]calendar.CalendarEventsWithError),
+							}
 						}
 					}()
 
@@ -1407,7 +1612,7 @@ func getCalendarAvailabilities(c *gin.Context) {
 						UserId: userId,
 						Events: calendarEvents,
 					}
-				}(eventResponse.UserId)
+				}(eventResponse.UserId, user, enabledAccounts)
 			}
 		}
 	}
@@ -1507,6 +1712,10 @@ func deleteEvent(c *gin.Context) {
 		})
 		err = result.Decode(&event)
 		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, responses.Error{Error: errs.EventNotFound})
+				return
+			}
 			logger.StdErr.Panicln(err)
 		}
 	} else {
@@ -1517,6 +1726,10 @@ func deleteEvent(c *gin.Context) {
 		})
 		err = result.Decode(&event)
 		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, responses.Error{Error: errs.EventNotFound})
+				return
+			}
 			logger.StdErr.Panicln(err)
 		}
 
@@ -1575,13 +1788,18 @@ func duplicateEvent(c *gin.Context) {
 		return
 	}
 
+	// Capture the original event id before reassigning, so we look up the
+	// existing responses by the real Mongo _id (the route param may be a
+	// short id, which GetEventResponses does not understand).
+	originalEventId := event.Id.Hex()
+
 	// Update event
 	event.Id = primitive.NewObjectID()
 	event.Name = payload.EventName
 	numResponses := 0
 	event.NumResponses = &numResponses
 	if *payload.CopyAvailability {
-		eventResponses := db.GetEventResponses(eventId)
+		eventResponses := db.GetEventResponses(originalEventId)
 		for _, eventResponse := range eventResponses {
 			eventResponse.Id = primitive.NewObjectID()
 			eventResponse.EventId = event.Id
@@ -1647,6 +1865,10 @@ func archiveEvent(c *gin.Context) {
 	var event models.Event
 	err = result.Decode(&event)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusNotFound, responses.Error{Error: errs.EventNotFound})
+			return
+		}
 		logger.StdErr.Panicln(err)
 	}
 

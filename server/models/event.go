@@ -58,6 +58,10 @@ type Event struct {
 	CollectEmails            *bool                `json:"collectEmails" bson:"collectEmails,omitempty"`
 	TimeIncrement            *int                 `json:"timeIncrement" bson:"timeIncrement,omitempty"`
 
+	// ResponseDeadline, if set, is the cutoff after which no new availability can be submitted
+	// or edited (organizers can still view results). Nil means no deadline.
+	ResponseDeadline *primitive.DateTime `json:"responseDeadline" bson:"responseDeadline,omitempty"`
+
 	// Used for specific times for specific dates feature
 	HasSpecificTimes *bool                `json:"hasSpecificTimes" bson:"hasSpecificTimes,omitempty"`
 	Times            []primitive.DateTime `json:"times" bson:"times,omitempty"`
@@ -87,9 +91,18 @@ type Event struct {
 	// Used to store the number of responses for the event
 	NumResponses *int `json:"numResponses" bson:"numResponses,omitempty"`
 
+	// Topics suggested by respondents (e.g. agenda items / discussion topics)
+	Topics []EventTopic `json:"topics" bson:"topics,omitempty"`
+	// TopicsEnabled controls whether respondents may suggest topics. Nil = enabled (default).
+	TopicsEnabled *bool `json:"topicsEnabled" bson:"topicsEnabled,omitempty"`
+
 	// Scheduled event
 	ScheduledEvent  *CalendarEvent `json:"scheduledEvent" bson:"scheduledEvent,omitempty"`
 	CalendarEventId string         `json:"calendarEventId" bson:"calendarEventId,omitempty"`
+
+	// MeetingLink is an optional video-call link (e.g. Google Meet) the creator attaches when they
+	// set the final scheduled time for the event.
+	MeetingLink string `json:"meetingLink" bson:"meetingLink,omitempty"`
 
 	// Remindees
 	Remindees *[]Remindee `json:"remindees" bson:"remindees,omitempty"`

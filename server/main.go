@@ -19,12 +19,10 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/stripe/stripe-go/v82"
 	"schej.it/server/db"
 	"schej.it/server/logger"
 	"schej.it/server/routes"
 	"schej.it/server/services/gcloud"
-	"schej.it/server/slackbot"
 	"schej.it/server/utils"
 
 	swaggerfiles "github.com/swaggo/files"
@@ -123,6 +121,21 @@ func main() {
 
 	// Session
 	store := cookie.NewStore([]byte(os.Getenv("SESSION_SECRET")))
+	// Harden the session cookie. Without these flags the gorilla cookie store
+	// defaults leave the session cookie readable by JavaScript (no HttpOnly),
+	// sendable over plain HTTP (no Secure), and with no explicit SameSite,
+	// making session theft via XSS and CSRF much easier.
+	//   - HttpOnly: keep the cookie out of reach of page JavaScript.
+	//   - Secure: only send over HTTPS in production (left off in dev so
+	//     http://localhost still works).
+	//   - SameSite=Lax: mitigate CSRF while still allowing top-level navigations.
+	store.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   60 * 60 * 24 * 30, // 30 days
+		HttpOnly: true,
+		Secure:   utils.IsRelease(),
+		SameSite: http.SameSiteLaxMode,
+	})
 	router.Use(sessions.Sessions("session", store))
 
 	// Init routes
@@ -132,9 +145,12 @@ func main() {
 	routes.InitUsers(apiRouter)
 	routes.InitEvents(apiRouter)
 	routes.InitAnalytics(apiRouter)
-	routes.InitStripe(apiRouter)
+	// Stripe/payments disabled for the internal WannPassts deployment (no paid tier).
+	// routes.InitStripe(apiRouter)
 	routes.InitFolders(apiRouter)
-	slackbot.InitSlackbot(apiRouter)
+	// Slack bot disabled: not used internally, and InitSlackbot mounts an unauthenticated
+	// /api/slackbot command endpoint (no Slack signature verification) we don't want exposed.
+	// slackbot.InitSlackbot(apiRouter)
 
 	frontendDist := os.Getenv("FRONTEND_DIST")
 	if frontendDist == "" {
@@ -189,8 +205,7 @@ func loadDotEnv() {
 		logger.StdOut.Println("No .env file found, using environment variables")
 	}
 
-	// Load stripe key
-	stripe.Key = os.Getenv("STRIPE_API_KEY")
+	// Stripe disabled for WannPassts (no paid tier).
 
 	// Validate session secret
 	validateSessionSecret()
@@ -224,7 +239,7 @@ func noRouteHandler() gin.HandlerFunc {
 			// params["enableStickyFooter"] = true
 
 			if event != nil {
-				title := fmt.Sprintf("%s - Timeful (formerly Schej)", event.Name)
+				title := fmt.Sprintf("%s - WannPassts", event.Name)
 				params["title"] = title
 				params["ogTitle"] = title
 

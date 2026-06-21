@@ -26,6 +26,8 @@ func InitUsers(router *gin.RouterGroup) {
 // @Success 200 {object} object{isPremium=bool}
 // @Router /users/{userId}/is-premium [get]
 func getIsUserPremium(c *gin.Context) {
+	// WannPassts is an internal tool with no paid tier: every (existing) user is treated as
+	// premium so all gated features are unlocked and ads never render. Unknown users return false.
 	userId := c.Param("userId")
 	user := db.GetUserById(userId)
 	if user == nil {
@@ -33,16 +35,7 @@ func getIsUserPremium(c *gin.Context) {
 		return
 	}
 
-	isPremium := false
-	if user.StripeCustomerId != nil {
-		if user.IsPremium != nil {
-			isPremium = *user.IsPremium
-		} else {
-			isPremium = true
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"isPremium": isPremium})
+	c.JSON(http.StatusOK, gin.H{"isPremium": true})
 }
 
 // @Summary Returns a minimal public user profile (safe for unauthenticated clients)

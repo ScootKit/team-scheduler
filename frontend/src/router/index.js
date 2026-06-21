@@ -1,15 +1,17 @@
 import Vue from "vue"
 import VueRouter from "vue-router"
-import Landing from "@/views/Landing"
 import { get } from "@/utils"
 
 Vue.use(VueRouter)
 
 const routes = [
   {
+    // Internal tool: there is no public landing page. "/" (and any lingering
+    // { name: "landing" } links) redirect to sign-in; the global guard then
+    // sends already-authenticated users on to /home.
     path: "/",
     name: "landing",
-    component: Landing,
+    redirect: { name: "sign-in" },
   },
   {
     path: "/home",
@@ -107,18 +109,12 @@ router.beforeEach(async (to, from, next) => {
       next()
     }
   } catch (err) {
+    // Not signed in: gated routes redirect to sign-in (there is no landing page).
     if (authRoutes.includes(to.name)) {
-      next({ name: "landing" })
+      next({ name: "sign-in" })
     } else {
       next()
     }
-  }
-
-  if (to.name !== "event" && to.name !== "group") {
-    const fusetag = window.fusetag || (window.fusetag = { que: [] })
-    fusetag.que.push(function () {
-      fusetag.destroySticky()
-    })
   }
 })
 

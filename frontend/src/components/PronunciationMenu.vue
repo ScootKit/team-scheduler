@@ -15,19 +15,19 @@
         v-bind="attrs"
         v-on="on"
       >
-        how to pronounce "schej"?
+        how to pronounce "WannPassts"?
       </span>
     </template>
     <v-card class="tw-p-3 tw-text-center">
       <div class="tw-text-left tw-text-sm">
-        Pronounced like "schedule" but shorter - "skej"
+        Pronounced "wann-passts" - like the German "wann passt's?"
       </div>
       <div
         class="pronunciation-image-container tw-mt-3 tw-flex tw-items-center tw-justify-center"
       >
         <img
           :src="currentImageSrc"
-          alt="Schej pronunciation animation"
+          alt="WannPassts pronunciation animation"
           class="pronunciation-animation-image"
         />
       </div>

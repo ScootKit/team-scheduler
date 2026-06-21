@@ -4,11 +4,11 @@ package routes
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"schej.it/server/db"
 	"schej.it/server/errs"
 	"schej.it/server/logger"
@@ -67,7 +68,11 @@ func signIn(c *gin.Context) {
 
 	user, err := signInHelper(c, tokens, models.WEB, payload.CalendarType, *payload.TimezoneOffset)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, responses.Error{Error: errs.InvalidIdToken})
+		if errors.Is(err, errEmailDomainNotAllowed) {
+			c.JSON(http.StatusForbidden, responses.Error{Error: errs.EmailDomainNotAllowed})
+		} else {
+			c.JSON(http.StatusUnauthorized, responses.Error{Error: errs.InvalidIdToken})
+		}
 		return
 	}
 
@@ -119,7 +124,11 @@ func signInMobile(c *gin.Context) {
 		payload.TimezoneOffset,
 	)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, responses.Error{Error: errs.InvalidIdToken})
+		if errors.Is(err, errEmailDomainNotAllowed) {
+			c.JSON(http.StatusForbidden, responses.Error{Error: errs.EmailDomainNotAllowed})
+		} else {
+			c.JSON(http.StatusUnauthorized, responses.Error{Error: errs.InvalidIdToken})
+		}
 		return
 	}
 
@@ -127,6 +136,10 @@ func signInMobile(c *gin.Context) {
 }
 
 // Helper function to sign user in with the given parameters from the google oauth route
+// errEmailDomainNotAllowed is returned by signInHelper when the authenticated email is not in the
+// configured ALLOWED_EMAIL_DOMAINS allowlist. Callers map it to a 403 response.
+var errEmailDomainNotAllowed = errors.New(errs.EmailDomainNotAllowed)
+
 func signInHelper(c *gin.Context, token auth.TokenResponse, tokenOrigin models.TokenOriginType, calendarType models.CalendarType, timezoneOffset int) (models.User, error) {
 	// Get access token expire time
 	accessTokenExpireDate := utils.GetAccessTokenExpireDate(token.ExpiresIn)
@@ -170,6 +183,11 @@ func signInHelper(c *gin.Context, token auth.TokenResponse, tokenOrigin models.T
 		picture = ""
 	}
 	email = utils.NormalizeEmail(email)
+
+	// Gate sign-in to approved company domains before creating or looking up any user.
+	if !utils.IsApprovedEmailDomain(email) {
+		return models.User{}, errEmailDomainNotAllowed
+	}
 
 	primaryAccountKey := utils.GetCalendarAccountKey(email, calendarType)
 
@@ -345,9 +363,21 @@ func checkEmail(c *gin.Context) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(payload.Email))
+
+	// Gate this endpoint to approved domains. Otherwise it is an unauthenticated account-
+	// existence oracle (it returns isNewUser = whether an account exists) usable to enumerate
+	// arbitrary email addresses. For non-allowed domains, return the same shape as a brand-new
+	// user so nothing about account existence is revealed.
+	if !utils.IsApprovedEmailDomain(email) {
+		// Domain not allowed. Reporting this does not leak account existence, so the client can
+		// show a clear message immediately instead of failing silently later at OTP send.
+		c.JSON(http.StatusOK, gin.H{"isNewUser": true, "allowed": false})
+		return
+	}
+
 	isNewUser := db.GetUserByEmail(email) == nil
 
-	c.JSON(http.StatusOK, gin.H{"isNewUser": isNewUser})
+	c.JSON(http.StatusOK, gin.H{"isNewUser": isNewUser, "allowed": true})
 }
 
 // @Summary Sends an OTP code to the given email
@@ -367,6 +397,28 @@ func sendOtp(c *gin.Context) {
 
 	email := strings.ToLower(strings.TrimSpace(payload.Email))
 
+	// Gate OTP sign-in to approved company domains before sending any code.
+	if !utils.IsApprovedEmailDomain(email) {
+		c.JSON(http.StatusForbidden, responses.Error{Error: errs.EmailDomainNotAllowed})
+		return
+	}
+
+	// Rate limit: refuse to send a new code if one was already sent to this
+	// email within the cooldown window. Without this, the endpoint can be
+	// abused to bomb arbitrary inboxes with OTP emails (and to enumerate
+	// accounts by timing). The 5-attempt cap on verification is unaffected.
+	const otpSendCooldown = 30 * time.Second
+	var lastOtp models.OtpCode
+	findErr := db.OtpCodesCollection.FindOne(
+		context.Background(),
+		bson.M{"email": email},
+		options.FindOne().SetSort(bson.M{"createdAt": -1}),
+	).Decode(&lastOtp)
+	if findErr == nil && time.Since(lastOtp.CreatedAt) < otpSendCooldown {
+		c.JSON(http.StatusTooManyRequests, responses.Error{Error: errs.OtpRateLimited})
+		return
+	}
+
 	// Delete any existing OTP codes for this email
 	db.OtpCodesCollection.DeleteMany(context.Background(), bson.M{"email": email})
 
@@ -376,6 +428,7 @@ func sendOtp(c *gin.Context) {
 		Code:      code,
 		ExpiresAt: time.Now().Add(10 * time.Minute),
 		Attempts:  0,
+		CreatedAt: time.Now(),
 	}
 
 	_, err := db.OtpCodesCollection.InsertOne(context.Background(), otpDoc)
@@ -383,16 +436,30 @@ func sendOtp(c *gin.Context) {
 		logger.StdErr.Panicln(err)
 	}
 
-	otpTemplateId, err := strconv.Atoi(os.Getenv("LISTMONK_OTP_EMAIL_TEMPLATE_ID"))
-	if err != nil {
-		logger.StdErr.Panicln("LISTMONK_OTP_EMAIL_TEMPLATE_ID is not set or invalid")
+	// Deliver the code via the configurable SMTP transport (Amazon SES in production).
+	// This is the login-critical path for helpers, so it does NOT depend on Listmonk.
+	if utils.IsEmailConfigured() {
+		subject := "Your WannPassts sign-in code"
+		body := fmt.Sprintf(
+			"Your WannPassts sign-in code is %s\n\nIt expires in 10 minutes. If you didn't request this, you can ignore this email.",
+			code,
+		)
+		utils.SendEmail(email, subject, body, "text/plain")
+		c.JSON(http.StatusOK, gin.H{})
+		return
 	}
 
-	listmonk.SendEmailAddSubscriberIfNotExist(email, otpTemplateId, bson.M{
-		"code": code,
-	}, false, "Timeful <noreply@timeful.app>")
+	// No email transport configured. In non-release (local/dev) only, log the code so
+	// sign-in stays testable. In release we must NEVER log the plaintext code, so fail
+	// closed instead of silently leaking it to stdout/logs.
+	if !utils.IsRelease() {
+		logger.StdOut.Printf("[DEV] OTP code for %s: %s\n", email, code)
+		c.JSON(http.StatusOK, gin.H{})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	logger.StdErr.Printf("OTP requested for %s but no SMTP transport is configured", email)
+	c.JSON(http.StatusInternalServerError, responses.Error{Error: "email-not-configured"})
 }
 
 // @Summary Verifies an OTP code and signs the user in
@@ -415,6 +482,12 @@ func verifyOtp(c *gin.Context) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(payload.Email))
+
+	// Defense in depth: gate OTP verification to approved company domains too.
+	if !utils.IsApprovedEmailDomain(email) {
+		c.JSON(http.StatusForbidden, responses.Error{Error: errs.EmailDomainNotAllowed})
+		return
+	}
 
 	// Find the OTP document
 	var otpDoc models.OtpCode

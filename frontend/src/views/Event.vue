@@ -1,8 +1,5 @@
 <template>
   <span>
-    <FormerlyKnownAs
-      class="tw-mx-auto tw-mb-10 tw-mt-3 tw-max-w-6xl tw-pl-4 sm:tw-pl-12"
-    />
     <!-- Video Ad (desktop only, when ads enabled) -->
     <div v-if="!isPhone && showAds" ref="videoAdContainer"></div>
     <div v-if="event" class="tw-mt-8 tw-h-full">
@@ -52,6 +49,16 @@
         no-tabs
       />
 
+      <!-- Schedule event dialog (owner only) -->
+      <ScheduleEventDialog
+        v-if="canEdit"
+        v-model="scheduleEventDialog"
+        :event="event"
+        :prefill="schedulePrefill"
+        @scheduled="onEventScheduled"
+        @cleared="onEventScheduleCleared"
+      />
+
       <!-- Group invitation dialog -->
       <InvitationDialog
         v-if="isGroup"
@@ -73,7 +80,7 @@
           <v-card-text
             ><span class="tw-font-medium"
               >You're about to add your availability without filling out all
-              pages of this Timeful.</span
+              pages of this event.</span
             >
             Click the left and right arrows at the top to switch between
             pages.</v-card-text
@@ -173,6 +180,16 @@
                     >
                       Edit {{ isGroup ? "group" : "event" }}
                     </v-btn>
+                    <v-btn
+                      v-if="!isGroup && !isSignUp"
+                      id="schedule-event-btn"
+                      @click="openScheduleDialog"
+                      class="tw-px-2 tw-text-sm tw-text-green"
+                      text
+                    >
+                      <v-icon small class="tw-mr-1">mdi-calendar-check</v-icon>
+                      Schedule this event
+                    </v-btn>
                   </template>
                 </div>
               </div>
@@ -220,7 +237,13 @@
                   </v-btn>
                 </div>
                 <div
-                  v-if="!isPhone && (!isSignUp || canEdit)"
+                  v-if="!isPhone && !canRespond && !isGroup"
+                  class="tw-flex tw-w-40 tw-items-center tw-justify-end tw-text-sm tw-font-medium tw-text-very-dark-gray"
+                >
+                  Responses are closed.
+                </div>
+                <div
+                  v-else-if="!isPhone && (!isSignUp || canEdit)"
                   class="tw-flex tw-w-40"
                 >
                   <template v-if="!isEditing">
@@ -269,11 +292,68 @@
               </div>
             </div>
 
+            <!-- Response deadline banner -->
+            <div v-if="responseDeadline" class="tw-mt-2">
+              <v-chip
+                v-if="deadlinePassed"
+                label
+                :small="isPhone"
+                class="tw-bg-light-gray tw-font-medium tw-text-red"
+              >
+                <v-icon small class="tw-mr-1 tw-text-red">mdi-lock</v-icon>
+                Responses closed on {{ deadlineFormatted }}
+              </v-chip>
+              <v-chip
+                v-else
+                label
+                :small="isPhone"
+                class="tw-bg-ligher-green tw-font-medium tw-text-green"
+              >
+                <v-icon small class="tw-mr-1 tw-text-green"
+                  >mdi-clock-outline</v-icon
+                >
+                Responses close {{ deadlineFormatted
+                }}<template v-if="deadlineRelative">
+                  ({{ deadlineRelative }})</template
+                >
+              </v-chip>
+            </div>
+
             <!-- Description -->
             <EventDescription
               :event.sync="event"
               :canEdit="event.ownerId != 0 && canEdit"
             />
+          </div>
+
+          <!-- Scheduled event banner (shown to everyone once a date is set) -->
+          <div
+            v-if="scheduledEventStartFormatted"
+            class="tw-mx-4 tw-mt-4 tw-flex tw-flex-col tw-gap-2 tw-rounded-lg tw-border tw-border-solid tw-border-green tw-bg-ligher-green tw-p-4 sm:tw-flex-row sm:tw-items-center sm:tw-justify-between"
+          >
+            <div class="tw-flex tw-items-center tw-gap-3">
+              <v-icon class="tw-text-green" large>mdi-calendar-check</v-icon>
+              <div>
+                <div class="tw-text-xs tw-font-medium tw-text-green">
+                  This event is scheduled for
+                </div>
+                <div class="tw-text-base tw-font-semibold tw-text-black">
+                  📅 {{ scheduledEventStartFormatted }}
+                </div>
+              </div>
+            </div>
+            <a
+              v-if="meetingLinkUrl"
+              :href="meetingLinkUrl"
+              target="_blank"
+              rel="noopener"
+              class="tw-no-underline"
+            >
+              <v-btn class="tw-bg-green tw-text-white" small>
+                <v-icon small class="tw-mr-1">mdi-video</v-icon>
+                Join Google Meet
+              </v-btn>
+            </a>
           </div>
 
           <!-- Calendar -->
@@ -298,6 +378,7 @@
             @deleteAvailability="deleteAvailability"
             @setCurGuestId="(id) => (curGuestId = id)"
             @signUpForBlock="initiateSignUpFlow"
+            @openScheduleDialog="openScheduleDialogPrefilled"
           />
         </div>
         <PubliftAd
@@ -317,6 +398,18 @@
         </PubliftAd>
       </div>
 
+      <!-- Suggested topics -->
+      <EventTopics
+        v-if="
+          topicsEnabled && !isSettingSpecificTimes && !isGroup && !isSignUp
+        "
+        ref="eventTopics"
+        :event="event"
+        :hasResponded="currentUserHasResponded"
+        :deadlinePassed="deadlinePassed"
+        :authorName="topicAuthorName"
+      />
+
       <PubliftAd
         :showAd="showAds"
         fuseId="meet_incontent_md"
@@ -332,52 +425,6 @@
       </PubliftAd>
 
       <!-- <CarbonAd :ownerIsPremium="ownerIsPremium" /> -->
-
-      <template v-if="showFeedbackBtn">
-        <div class="tw-w-full tw-border-t tw-border-solid tw-border-gray"></div>
-
-        <div class="tw-flex tw-flex-col tw-items-center" v-if="showFeedbackBtn">
-          <v-btn
-            class="tw-h-16"
-            block
-            id="feedback-btn"
-            text
-            href="https://forms.gle/A96i4TTWeKgH3P1W6"
-            target="_blank"
-          >
-            Give feedback to Timeful team
-          </v-btn>
-          <!-- <div
-            class="tw-w-full tw-border-t tw-border-solid tw-border-gray"
-          ></div> -->
-          <!-- <v-btn
-            class="tw-h-16"
-            block
-            text
-            href="https://www.paypal.com/donate/?hosted_button_id=KWCH6LGJCP6E6"
-            target="_blank"
-          >
-            Donate
-          </v-btn> -->
-          <div
-            class="tw-w-full tw-border-t tw-border-solid tw-border-gray"
-          ></div>
-          <v-btn class="tw-h-16" block text :to="{ name: 'privacy-policy' }">
-            Privacy Policy
-          </v-btn>
-        </div>
-      </template>
-
-      <div
-        class="tw-mb-16 tw-hidden tw-flex-col tw-items-center tw-justify-between sm:tw-flex"
-      >
-        <router-link
-          class="tw-text-xs tw-font-medium tw-text-gray"
-          :to="{ name: 'privacy-policy' }"
-        >
-          Privacy Policy
-        </router-link>
-      </div>
 
       <div
         :class="isPhone ? (showAds ? 'tw-h-[125px]' : 'tw-h-8') : 'tw-h-8'"
@@ -403,23 +450,30 @@
               >Schedule</v-btn
             >
             <v-spacer />
-            <v-btn
-              v-if="!isGroup && !authUser && selectedGuestRespondent"
-              class="tw-bg-white tw-text-green tw-transition-opacity"
-              :style="{ opacity: availabilityBtnOpacity }"
-              @click="editGuestAvailability"
-            >
-              {{ mobileGuestActionButtonText }}
-            </v-btn>
-            <v-btn
-              v-else
-              class="tw-bg-white tw-text-green tw-transition-opacity"
-              :disabled="loading && !userHasResponded"
-              :style="{ opacity: availabilityBtnOpacity }"
-              @click="() => addAvailability()"
-            >
-              {{ mobileActionButtonText }}
-            </v-btn>
+            <template v-if="!canRespond && !isGroup">
+              <span class="tw-text-sm tw-font-medium tw-text-white">
+                Responses are closed.
+              </span>
+            </template>
+            <template v-else>
+              <v-btn
+                v-if="!isGroup && !authUser && selectedGuestRespondent"
+                class="tw-bg-white tw-text-green tw-transition-opacity"
+                :style="{ opacity: availabilityBtnOpacity }"
+                @click="editGuestAvailability"
+              >
+                {{ mobileGuestActionButtonText }}
+              </v-btn>
+              <v-btn
+                v-else
+                class="tw-bg-white tw-text-green tw-transition-opacity"
+                :disabled="loading && !userHasResponded"
+                :style="{ opacity: availabilityBtnOpacity }"
+                @click="() => addAvailability()"
+              >
+                {{ mobileActionButtonText }}
+              </v-btn>
+            </template>
           </template>
           <template v-else-if="isEditing">
             <v-btn text class="tw-text-white" @click="cancelEditing">
@@ -498,6 +552,8 @@ import {
   convertUTCSlotsToLocalISO,
   validateDOWPayload,
   timezoneObservesDST,
+  formatResponseDeadline,
+  formatTimeUntil,
 } from "@/utils"
 import { isBetween } from "@/utils/general_utils"
 import { validateEmail } from "@/utils"
@@ -527,7 +583,8 @@ import MarkAvailabilityDialog from "@/components/calendar_permission_dialogs/Mar
 import InvitationDialog from "@/components/groups/InvitationDialog.vue"
 import HelpDialog from "@/components/HelpDialog.vue"
 import EventDescription from "@/components/event/EventDescription.vue"
-import FormerlyKnownAs from "@/components/FormerlyKnownAs.vue"
+import EventTopics from "@/components/event/EventTopics.vue"
+import ScheduleEventDialog from "@/components/event/ScheduleEventDialog.vue"
 import CarbonAd from "@/components/event/CarbonAd.vue"
 import PubliftAd from "@/components/event/PubliftAd.vue"
 export default {
@@ -552,7 +609,8 @@ export default {
     InvitationDialog,
     HelpDialog,
     EventDescription,
-    FormerlyKnownAs,
+    EventTopics,
+    ScheduleEventDialog,
     CarbonAd,
     PubliftAd,
   },
@@ -568,6 +626,8 @@ export default {
     invitationDialog: false,
     pagesNotVisitedDialog: false,
     helpDialog: false,
+    scheduleEventDialog: false,
+    schedulePrefill: null, // {startDate, endDate} ISO when opened from the grid "schedule event" flow
 
     loading: true,
     calendarEventsMap: {},
@@ -592,11 +652,19 @@ export default {
 
     // Sign Up Forms
     currSignUpBlock: null,
+
+    // Ticks every 30s so the deadline countdown ("in X minutes") stays live and the
+    // closed/open state flips without a manual refresh.
+    nowTs: Date.now(),
+    deadlineTimer: null,
   }),
 
   beforeMount() {},
 
   mounted() {
+    this.deadlineTimer = setInterval(() => {
+      this.nowTs = Date.now()
+    }, 30000)
     // If coming from enabling contacts, show the dialog. Checks if contactsPayload is not an Observer.
     this.editEventDialog = Object.keys(this.contactsPayload).length > 0
     // If coming from signing in to link apple calendar, show the mark availability dialog
@@ -664,6 +732,20 @@ export default {
     userHasResponded() {
       return this.authUser?._id in this.event.responses
     },
+    /** Whether the current user (auth or guest) has saved their availability */
+    currentUserHasResponded() {
+      if (this.userHasResponded) return true
+      return Boolean(this.scheduleOverlapComponent?.guestAddedAvailability)
+    },
+    /** Suggested author name to prefill new topics with */
+    topicAuthorName() {
+      if (this.authUser) {
+        return `${this.authUser.firstName || ""} ${
+          this.authUser.lastName || ""
+        }`.trim()
+      }
+      return this.scheduleOverlapComponent?.guestName || ""
+    },
     selectedGuestRespondent() {
       return this.scheduleOverlapComponent?.selectedGuestRespondent
     },
@@ -695,6 +777,47 @@ export default {
         this.scheduleOverlapComponent?.state ===
         this.scheduleOverlapComponent?.states.SET_SPECIFIC_TIMES
       )
+    },
+    /** Whether respondents may suggest topics (creator opt-out; default enabled) */
+    topicsEnabled() {
+      return this.event?.topicsEnabled !== false
+    },
+    /** The event's response deadline as a Date, or null when unset */
+    responseDeadline() {
+      if (!this.event?.responseDeadline) return null
+      const d = new Date(this.event.responseDeadline)
+      return isNaN(d.getTime()) ? null : d
+    },
+    /** Whether the response deadline (if any) has passed */
+    deadlinePassed() {
+      return (
+        this.responseDeadline != null &&
+        this.responseDeadline.getTime() <= this.nowTs
+      )
+    },
+    /** Human-readable local date + time for the deadline */
+    deadlineFormatted() {
+      return formatResponseDeadline(this.responseDeadline)
+    },
+    /** Live relative countdown to the deadline, e.g. "in 23 minutes" */
+    deadlineRelative() {
+      return formatTimeUntil(this.responseDeadline, this.nowTs)
+    },
+    /** Whether availability editing controls should be shown */
+    canRespond() {
+      return !this.deadlinePassed
+    },
+    /** Formatted local date + time of the persisted scheduled event, or "" */
+    scheduledEventStartFormatted() {
+      const start = this.event?.scheduledEvent?.startDate
+      if (!start) return ""
+      return formatResponseDeadline(start)
+    },
+    /** The meeting link, only when it's a non-empty http(s) URL */
+    meetingLinkUrl() {
+      const link = this.event?.meetingLink
+      if (typeof link !== "string" || link.length === 0) return ""
+      return /^https?:\/\//i.test(link) ? link : ""
     },
   },
 
@@ -735,6 +858,12 @@ export default {
     /** Show choice dialog if not signed in, otherwise, immediately start editing availability */
     addAvailability() {
       if (!this.scheduleOverlapComponent) return
+
+      // Don't allow adding/editing availability once the response deadline has passed
+      if (this.deadlinePassed && !this.isGroup) {
+        this.showInfo("Responses are closed for this event.")
+        return
+      }
 
       // Start editing immediately if days only
       if (this.event?.daysOnly) {
@@ -925,9 +1054,12 @@ export default {
 
       if (!this.authUser || this.addingAvailabilityAsGuest) {
         if (this.curGuestId) {
+          // Returning guest editing an existing response: they already consented
+          // to the privacy policy on their first submission, so re-affirm it.
           this.saveChangesAsGuest({
             name: this.curGuestId,
             email: this.event.responses[this.curGuestId].email,
+            consentedToPrivacyPolicy: true,
           })
           this.curGuestId = ""
           this.addingAvailabilityAsGuest = false
@@ -939,31 +1071,109 @@ export default {
 
       let changesPersisted = true
 
-      if (this.isSignUp) {
-        changesPersisted =
-          await this.scheduleOverlapComponent.submitNewSignUpBlocks()
-      } else {
-        await this.scheduleOverlapComponent.submitAvailability()
+      try {
+        if (this.isSignUp) {
+          changesPersisted =
+            await this.scheduleOverlapComponent.submitNewSignUpBlocks()
+        } else {
+          await this.scheduleOverlapComponent.submitAvailability()
+        }
+      } catch (err) {
+        if (this.isResponseDeadlinePassedError(err)) {
+          this.handleResponseDeadlinePassed()
+          return
+        }
+        throw err
       }
 
       if (changesPersisted) {
-        this.showInfo("Changes saved!")
+        this.showInfo("Changes saved! 💡 Suggest a topic below.")
         this.scheduleOverlapComponent.stopEditing()
+        this.promptTopics()
       }
+    },
+    /** After saving availability, nudge the user toward the Suggest-a-topic box. */
+    promptTopics() {
+      this.$nextTick(() => {
+        setTimeout(() => {
+          if (this.$refs.eventTopics && this.$refs.eventTopics.focusSuggest) {
+            this.$refs.eventTopics.focusSuggest()
+          }
+        }, 500)
+      })
     },
     async saveChangesAsGuest(payload) {
       /* After guest dialog is submitted, submit availability with the given name */
       if (!this.scheduleOverlapComponent) return
 
       if (payload.name.length > 0) {
-        await this.scheduleOverlapComponent.submitAvailability(payload)
+        try {
+          await this.scheduleOverlapComponent.submitAvailability(payload)
+        } catch (err) {
+          if (this.isResponseDeadlinePassedError(err)) {
+            this.handleResponseDeadlinePassed()
+            return
+          }
+          throw err
+        }
 
-        this.showInfo("Changes saved!")
+        this.showInfo("Changes saved! 💡 Suggest a topic below.")
         this.scheduleOverlapComponent.resetCurUserAvailability()
         this.scheduleOverlapComponent.stopEditing()
+        this.promptTopics()
         this.guestDialog = false
         this.addingAvailabilityAsGuest = false
       }
+    },
+    /** Detects the backend's 403 response-deadline-passed error */
+    isResponseDeadlinePassedError(err) {
+      return (
+        err?.status === 403 &&
+        err?.parsed?.error === "response-deadline-passed"
+      )
+    },
+    /** Shows a friendly message and exits editing when responses are closed */
+    handleResponseDeadlinePassed() {
+      this.showInfo("Responses are closed for this event.")
+      // Refresh so the deadline banner / closed state reflects reality
+      this.refreshEvent()
+      this.scheduleOverlapComponent?.stopEditing()
+      this.guestDialog = false
+      this.addingAvailabilityAsGuest = false
+    },
+
+    /** Owner saved a final schedule via the dialog: update locally + re-fetch */
+    /** Open the schedule dialog normally (no prefill from the grid). */
+    openScheduleDialog() {
+      this.schedulePrefill = null
+      this.scheduleEventDialog = true
+    },
+    /** Open the schedule dialog prefilled with a date/time chosen via the grid
+     *  "schedule event" flow, so the owner only needs to add the Meet link. */
+    openScheduleDialogPrefilled(payload) {
+      this.schedulePrefill = payload
+      this.scheduleEventDialog = true
+    },
+    onEventScheduled(scheduledEvent) {
+      if (this.event) {
+        this.$set(this.event, "scheduledEvent", {
+          summary: scheduledEvent.summary,
+          startDate: scheduledEvent.startDate,
+          endDate: scheduledEvent.endDate,
+        })
+        this.$set(this.event, "meetingLink", scheduledEvent.meetingLink || "")
+      }
+      this.showInfo("Event scheduled!")
+      this.refreshEvent()
+    },
+    /** Owner cleared the schedule via the dialog: update locally + re-fetch */
+    onEventScheduleCleared() {
+      if (this.event) {
+        this.$set(this.event, "scheduledEvent", null)
+        this.$set(this.event, "meetingLink", "")
+      }
+      this.showInfo("Schedule cleared.")
+      this.refreshEvent()
     },
 
     scheduleEvent() {
@@ -1909,6 +2119,7 @@ export default {
   },
 
   beforeDestroy() {
+    if (this.deadlineTimer) clearInterval(this.deadlineTimer)
     window.removeEventListener("beforeunload", this.onBeforeUnload)
     window.removeEventListener("message", this.handleMessage)
     // for dev:
@@ -1922,7 +2133,7 @@ export default {
         this.$nextTick(() => {
           this.scheduleOverlapComponent = this.$refs.scheduleOverlap
         })
-        document.title = `${this.event.name} - Timeful`
+        document.title = `${this.event.name} - WannPassts`
       }
     },
     ownerPremiumChecked(val) {
