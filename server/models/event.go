@@ -113,6 +113,11 @@ type Event struct {
 	// has already been sent. Lets the poller fire once per scheduled time (and again if rescheduled).
 	StartNotifiedFor *primitive.DateTime `json:"-" bson:"startNotifiedFor,omitempty"`
 
+	// DeadlineReminderSentFor is the responseDeadline value for which the "24h left to submit
+	// availability" webhook has already been sent. Lets the poller fire once per deadline (and again
+	// if the deadline is changed).
+	DeadlineReminderSentFor *primitive.DateTime `json:"-" bson:"deadlineReminderSentFor,omitempty"`
+
 	// Remindees
 	Remindees *[]Remindee `json:"remindees" bson:"remindees,omitempty"`
 

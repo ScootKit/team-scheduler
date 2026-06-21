@@ -151,6 +151,10 @@ func createEvent(c *gin.Context) {
 	shortId := db.GenerateShortEventId(event.Id)
 	event.ShortId = &shortId
 
+	// Don't fire the "submit availability" reminder for a deadline that's already inside the reminder
+	// window at creation — only deadlines that later cross into the window should trigger it.
+	suppressImminentDeadlineReminder(&event)
+
 	// Schedule reminder emails if remindees array is not empty
 	if len(payload.Remindees) > 0 {
 		// Determine owner name
@@ -337,9 +341,18 @@ func editEvent(c *gin.Context) {
 	event.DaysOnly = payload.DaysOnly
 	event.SendEmailAfterXResponses = payload.SendEmailAfterXResponses
 	event.CollectEmails = payload.CollectEmails
+	oldDeadline := event.ResponseDeadline
 	event.ResponseDeadline = payload.ResponseDeadline
 	event.TopicsEnabled = payload.TopicsEnabled
 	event.Type = payload.Type
+
+	// Only re-evaluate the deadline reminder when the deadline VALUE actually changed. Changing it to
+	// an imminent time suppresses the reminder; changing it otherwise leaves the marker stale so the
+	// reminder re-arms and fires on window entry. An edit that doesn't touch the deadline must NOT
+	// suppress a reminder that's already pending for the unchanged deadline.
+	if !deadlinesEqual(oldDeadline, event.ResponseDeadline) {
+		suppressImminentDeadlineReminder(event)
+	}
 
 	// Update remindees
 	if event.Type == models.DOW || event.Type == models.SPECIFIC_DATES {
@@ -2050,6 +2063,8 @@ func duplicateEvent(c *gin.Context) {
 	event.MeetingLink = ""
 	event.Topics = nil
 	event.ResponseDeadline = nil
+	event.StartNotifiedFor = nil
+	event.DeadlineReminderSentFor = nil
 	if *payload.CopyAvailability {
 		eventResponses := db.GetEventResponses(originalEventId)
 		for _, eventResponse := range eventResponses {
@@ -2367,6 +2382,31 @@ func shouldKeepGroupResponseUserEmails(event *models.Event, userSesh string, isO
 // exposed in the event page API response (calendar accounts, billing info, etc.).
 // Email is NOT stripped here as callers handle email visibility separately based
 // on the collectEmails setting and owner status.
+// deadlineReminderLead must stay in sync with eventreminder.deadlineReminderLead — how far ahead of
+// the response deadline the "submit availability" reminder fires.
+const deadlineReminderLead = 24 * time.Hour
+
+// deadlinesEqual reports whether two nullable deadlines are the same instant (both nil counts equal).
+func deadlinesEqual(a, b *primitive.DateTime) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// suppressImminentDeadlineReminder pre-marks the event as already-reminded when its deadline is
+// already within the reminder window at the time it's set, so the poller won't fire an immediate
+// reminder. A deadline beyond the window leaves the marker stale (it won't match the new deadline),
+// so the reminder still fires once the deadline crosses into the window.
+func suppressImminentDeadlineReminder(event *models.Event) {
+	if event.ResponseDeadline == nil {
+		return
+	}
+	if event.ResponseDeadline.Time().Before(time.Now().Add(deadlineReminderLead)) {
+		event.DeadlineReminderSentFor = event.ResponseDeadline
+	}
+}
+
 func stripSensitiveUserFields(user *models.User) {
 	if user == nil {
 		return

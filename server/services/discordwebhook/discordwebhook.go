@@ -15,8 +15,9 @@ import (
 
 // Brand colors for embeds (decimal RGB).
 const (
-	ColorGreen = 0x00994C // scheduled / confirmed
-	ColorBlue  = 0x3B82F6 // new event / call to action
+	ColorGreen  = 0x00994C // scheduled / confirmed
+	ColorBlue   = 0x3B82F6 // new event / call to action
+	ColorOrange = 0xF59E0B // reminder / deadline approaching
 )
 
 // allowedHosts is the set of hosts a folder webhook URL may point at. Restricting to Discord's own

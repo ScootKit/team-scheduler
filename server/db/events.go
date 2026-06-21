@@ -294,3 +294,40 @@ func MarkStartNotified(eventId primitive.ObjectID, startDate primitive.DateTime)
 		logger.StdErr.Println(err)
 	}
 }
+
+// GetEventsDueForDeadlineReminder returns events whose response deadline is approaching — within
+// `lead` of now and not yet passed — for which the "submit your availability" reminder hasn't been
+// sent (deadlineReminderSentFor != responseDeadline, so changing the deadline re-arms it).
+func GetEventsDueForDeadlineReminder(now time.Time, lead time.Duration) []models.Event {
+	nowDt := primitive.NewDateTimeFromTime(now)
+	windowEnd := primitive.NewDateTimeFromTime(now.Add(lead))
+
+	cursor, err := EventsCollection.Find(context.Background(), bson.M{
+		"responseDeadline": bson.M{"$gt": nowDt, "$lte": windowEnd},
+		"$expr":            bson.M{"$ne": bson.A{"$deadlineReminderSentFor", "$responseDeadline"}},
+		"$or": bson.A{
+			bson.M{"isDeleted": bson.M{"$exists": false}},
+			bson.M{"isDeleted": false},
+		},
+	})
+	if err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	var events []models.Event
+	if err := cursor.All(context.Background(), &events); err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	return events
+}
+
+func MarkDeadlineReminderSent(eventId primitive.ObjectID, deadline primitive.DateTime) {
+	_, err := EventsCollection.UpdateOne(context.Background(),
+		bson.M{"_id": eventId},
+		bson.M{"$set": bson.M{"deadlineReminderSentFor": deadline}},
+	)
+	if err != nil {
+		logger.StdErr.Println(err)
+	}
+}

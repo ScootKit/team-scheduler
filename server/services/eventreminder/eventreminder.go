@@ -19,6 +19,9 @@ const (
 	// graceWindow bounds how late a "starting now" ping may be sent, so a server restart doesn't
 	// emit notifications for events whose start was missed long ago.
 	graceWindow = 15 * time.Minute
+	// deadlineReminderLead is how far before the response deadline the "submit your availability"
+	// reminder fires. The reminder is sent on the first poll where the deadline is within this window.
+	deadlineReminderLead = 24 * time.Hour
 )
 
 // StartPoller launches the background poller. Call once at startup.
@@ -74,6 +77,43 @@ func runOnce() {
 
 		// Mark as notified regardless (nothing to send if no webhook folder) so we don't re-process.
 		db.MarkStartNotified(event.Id, startDate)
+	}
+
+	notifyDeadlinesApproaching(now)
+}
+
+// notifyDeadlinesApproaching posts a "submit your availability" reminder with a live Discord
+// countdown to each webhook folder when an event's response deadline comes within the lead window.
+func notifyDeadlinesApproaching(now time.Time) {
+	for _, event := range db.GetEventsDueForDeadlineReminder(now, deadlineReminderLead) {
+		if event.ResponseDeadline == nil {
+			continue
+		}
+		deadline := *event.ResponseDeadline
+
+		folders := db.GetWebhookFoldersForEvent(event.Id, event.OwnerId)
+		if len(folders) > 0 {
+			eventUrl := fmt.Sprintf("%s/e/%s", utils.GetBaseUrl(), utils.Coalesce(event.ShortId))
+			unix := deadline.Time().Unix()
+			// <t:UNIX:R> renders a live relative countdown ("in 23 hours") in Discord.
+			desc := fmt.Sprintf(
+				"⏳ Voting closes <t:%d:R> — submit your availability before then!\n\n🔗 [Open the event](%s)",
+				unix, eventUrl,
+			)
+			embed := discordwebhook.Embed{
+				Title:       fmt.Sprintf("⏰ Last call: %s", sanitizeTitle(event.Name)),
+				Description: desc,
+				URL:         eventUrl,
+				Color:       discordwebhook.ColorOrange,
+			}
+			button := discordwebhook.Button{Label: "🗳️ Submit availability", URL: eventUrl}
+			for _, folder := range folders {
+				discordwebhook.SendEmbed(utils.Coalesce(folder.WebhookUrl), embed, button)
+			}
+		}
+
+		// Mark regardless (nothing to send if no webhook folder) so we don't re-process this deadline.
+		db.MarkDeadlineReminderSent(event.Id, deadline)
 	}
 }
 
