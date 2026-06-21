@@ -24,6 +24,7 @@ import (
 	"schej.it/server/models"
 	"schej.it/server/responses"
 	"schej.it/server/services/calendar"
+	"schej.it/server/services/discordwebhook"
 	"schej.it/server/services/gcloud"
 	"schej.it/server/services/listmonk"
 	"schej.it/server/utils"
@@ -1349,6 +1350,12 @@ func setScheduledEvent(c *gin.Context) {
 			"scheduledEvent": scheduled,
 			"meetingLink":    link,
 		}}
+
+		// Notify available respondents only the first time an event is scheduled (not on re-schedule).
+		if event.ScheduledEvent == nil {
+			eventCopy := *event
+			go notifyAvailableRespondents(&eventCopy, scheduled, link)
+		}
 	}
 
 	if _, err := db.EventsCollection.UpdateOne(context.Background(), bson.M{"_id": event.Id}, update); err != nil {
@@ -1357,7 +1364,173 @@ func setScheduledEvent(c *gin.Context) {
 		return
 	}
 
+	// Announce a (re)schedule to any of the owner's webhook folders containing this event.
+	if !payload.Clear && payload.StartDate != nil {
+		when := payload.StartDate.Time().UTC().Format("Mon, 2 Jan 2006 15:04") + " (UTC)"
+		meetLink := strings.TrimSpace(payload.MeetingLink)
+		go func(ev models.Event, when, meetLink string) {
+			eventUrl := fmt.Sprintf("%s/e/%s", utils.GetBaseUrl(), utils.Coalesce(ev.ShortId))
+			desc := fmt.Sprintf("🎉 A time has been locked in!\n\n🗓️ **%s**", when)
+			if meetLink != "" {
+				desc += fmt.Sprintf("\n📹 **[Join the meeting](%s)**", meetLink)
+			}
+			desc += fmt.Sprintf("\n\n🔗 [View the event](%s)", eventUrl)
+			embed := discordwebhook.Embed{
+				Title:       fmt.Sprintf("✅ %s is scheduled!", sanitizeForDiscord(ev.Name)),
+				Description: desc,
+				URL:         eventUrl,
+				Color:       discordwebhook.ColorGreen,
+			}
+			for _, folder := range db.GetWebhookFoldersForEvent(ev.Id, ev.OwnerId) {
+				discordwebhook.SendEmbed(utils.Coalesce(folder.WebhookUrl), embed)
+			}
+		}(*event, when, meetLink)
+	}
+
 	c.JSON(http.StatusOK, gin.H{})
+}
+
+// sanitizeForEmail strips control characters (including CR/LF) from user-controlled strings before
+// they are placed into an email subject/body, preventing email-header (CRLF) injection. The email is
+// sent as text/plain, so the value is never interpreted as HTML/markup.
+func sanitizeForEmail(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' {
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(s))
+}
+
+// sanitizeForDiscord strips control characters and defangs mass-mention tokens from user-controlled
+// text before it goes into a Discord embed. allowed_mentions already prevents pings from being
+// parsed, but we also break "@everyone"/"@here" with a zero-width space as defense in depth.
+func sanitizeForDiscord(s string) string {
+	s = sanitizeForEmail(s)
+	s = strings.ReplaceAll(s, "@everyone", "@​everyone")
+	s = strings.ReplaceAll(s, "@here", "@​here")
+	return s
+}
+
+// timeKey reduces a time to a comparable integer. For recurring events (DOW/group) availability is
+// stored relative to a reference week, so we compare by minute-of-week; for specific-dates events we
+// compare absolute minutes. All comparisons use UTC, matching how slots are stored.
+func timeKey(t time.Time, recurring bool) int64 {
+	t = t.UTC()
+	if recurring {
+		return int64(t.Weekday())*1440 + int64(t.Hour())*60 + int64(t.Minute())
+	}
+	return t.Unix() / 60
+}
+
+// keyInWindow reports whether key k falls in [start, end). For recurring events the window may wrap
+// the week boundary (e.g. a Sat→Sun slot), which is handled explicitly.
+func keyInWindow(k, start, end int64, recurring bool) bool {
+	if recurring && end <= start {
+		return k >= start || k < end
+	}
+	return k >= start && k < end
+}
+
+// responseAvailableDuring reports whether a response has any availability or if-needed slot that
+// overlaps the scheduled window. ("Any part" overlap, if-needed included.)
+func responseAvailableDuring(r *models.Response, recurring bool, startKey, endKey int64) bool {
+	if r == nil {
+		return false
+	}
+	slots := make([]primitive.DateTime, 0, len(r.Availability)+len(r.IfNeeded))
+	slots = append(slots, r.Availability...)
+	slots = append(slots, r.IfNeeded...)
+	for _, s := range slots {
+		if keyInWindow(timeKey(s.Time(), recurring), startKey, endKey, recurring) {
+			return true
+		}
+	}
+	return false
+}
+
+// notifyAvailableRespondents emails every respondent who was available (or if-needed) for any part of
+// the scheduled window, telling them the event was scheduled. Runs in a goroutine; guests without a
+// stored email and the owner are skipped. Only signed-in respondents have emails.
+func notifyAvailableRespondents(event *models.Event, scheduled models.CalendarEvent, meetingLink string) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.StdErr.Printf("notifyAvailableRespondents panic: %v", r)
+		}
+	}()
+
+	start := scheduled.StartDate.Time().UTC()
+	end := scheduled.EndDate.Time().UTC()
+	if !end.After(start) {
+		end = start.Add(time.Hour) // defensive fallback if end is missing/invalid
+	}
+	recurring := event.Type == models.DOW || event.Type == models.GROUP
+	startKey := timeKey(start, recurring)
+	endKey := timeKey(end, recurring)
+
+	ownerEmail := ""
+	if owner := db.GetUserById(event.OwnerId.Hex()); owner != nil {
+		ownerEmail = strings.ToLower(strings.TrimSpace(owner.Email))
+	}
+
+	// User-controlled strings (event name, respondent name) go into a text/plain email. Strip control
+	// characters so they can't inject email headers (CRLF) or break the plain-text body; the email is
+	// not HTML so the content is never interpreted as markup.
+	eventName := sanitizeForEmail(event.Name)
+	eventUrl := fmt.Sprintf("%s/e/%s", utils.GetBaseUrl(), utils.Coalesce(event.ShortId))
+	whenStr := fmt.Sprintf("%s – %s (UTC)",
+		start.Format("Mon, 2 Jan 2006 15:04"),
+		end.Format("15:04"),
+	)
+
+	seen := make(map[string]bool)
+	for _, er := range db.GetEventResponses(event.Id.Hex()) {
+		if !responseAvailableDuring(er.Response, recurring, startKey, endKey) {
+			continue
+		}
+
+		// Resolve recipient email: signed-in users via their account, else a stored guest email.
+		email, name := "", er.Response.Name
+		if oid, err := primitive.ObjectIDFromHex(er.UserId); err == nil {
+			if u := db.GetUserById(oid.Hex()); u != nil {
+				email = u.Email
+				if name == "" {
+					name = u.FirstName
+				}
+			}
+		}
+		if email == "" {
+			email = strings.TrimSpace(er.Response.Email)
+		}
+		email = strings.TrimSpace(email)
+		if email == "" {
+			continue
+		}
+		lower := strings.ToLower(email)
+		if lower == ownerEmail || seen[lower] {
+			continue
+		}
+		seen[lower] = true
+
+		greeting := "Hi"
+		if cleanName := sanitizeForEmail(name); cleanName != "" {
+			greeting = "Hi " + cleanName
+		}
+		body := fmt.Sprintf(
+			"%s,\n\n\"%s\" has been scheduled for a time you marked as available:\n\n%s\n",
+			greeting, eventName, whenStr,
+		)
+		if meetingLink != "" {
+			body += fmt.Sprintf("\nJoin: %s\n", meetingLink)
+		}
+		body += fmt.Sprintf("\nView the event: %s\n", eventUrl)
+
+		logger.StdOut.Printf("[schedule-notify] emailing %s that event %q was scheduled", email, eventName)
+		utils.SendEmail(email, fmt.Sprintf("%s has been scheduled", eventName), body, "text/plain")
+	}
 }
 
 // @Summary Rename a guest response

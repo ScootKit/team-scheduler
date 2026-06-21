@@ -3,6 +3,7 @@ package routes
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"schej.it/server/services/auth"
 	"schej.it/server/services/calendar"
 	"schej.it/server/services/contacts"
+	"schej.it/server/services/discordwebhook"
 	"schej.it/server/utils"
 )
 
@@ -274,6 +276,26 @@ func setEventFolder(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add event to folder"})
 		return
+	}
+
+	// If the event was added to a folder with a Discord webhook, announce it with a CTA.
+	if folderId != nil {
+		if folder, ferr := db.GetFolderById(*folderId, userId); ferr == nil &&
+			folder.WebhookUrl != nil && *folder.WebhookUrl != "" {
+			if event := db.GetEventByEitherId(eventId.Hex()); event != nil {
+				eventUrl := fmt.Sprintf("%s/e/%s", utils.GetBaseUrl(), utils.Coalesce(event.ShortId))
+				embed := discordwebhook.Embed{
+					Title: fmt.Sprintf("🗳️ %s — ready to vote on!", sanitizeForDiscord(event.Name)),
+					Description: fmt.Sprintf(
+						"📅 A new event is ready in **%s**.\n\n👉 **[Enter your availability](%s)** so we can find a time that works for everyone! ⏰",
+						sanitizeForDiscord(folder.Name), eventUrl,
+					),
+					URL:   eventUrl,
+					Color: discordwebhook.ColorBlue,
+				}
+				go discordwebhook.SendEmbed(*folder.WebhookUrl, embed)
+			}
+		}
 	}
 
 	c.Status(http.StatusOK)

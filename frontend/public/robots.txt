@@ -1,4 +1,3 @@
+# WannPassts is a private, internal tool — keep it out of search engines entirely.
 User-agent: *
-Disallow: /e/
-Disallow: /s/
-Disallow: /g/
+Disallow: /

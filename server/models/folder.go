@@ -10,5 +10,9 @@ type Folder struct {
 	Color     *string `json:"color,omitempty" bson:"color,omitempty"`
 	IsDeleted *bool   `json:"isDeleted,omitempty" bson:"isDeleted,omitempty"`
 
+	// WebhookUrl, if set, is a Discord webhook the folder posts to when events are added to it or
+	// scheduled. Validated to be a discord.com webhook URL (see services/discordwebhook).
+	WebhookUrl *string `json:"webhookUrl,omitempty" bson:"webhookUrl,omitempty"`
+
 	EventIds []primitive.ObjectID `json:"eventIds" bson:"-"`
 }

@@ -2,6 +2,7 @@ package routes
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,7 @@ import (
 	"schej.it/server/db"
 	"schej.it/server/middleware"
 	"schej.it/server/models"
+	"schej.it/server/services/discordwebhook"
 )
 
 func InitFolders(router *gin.RouterGroup) {
@@ -107,8 +109,9 @@ type CreateFolderResponse struct {
 // @Router /user/folders [post]
 func CreateFolder(c *gin.Context) {
 	var body struct {
-		Name  string  `json:"name" binding:"required"`
-		Color *string `json:"color"`
+		Name       string  `json:"name" binding:"required"`
+		Color      *string `json:"color"`
+		WebhookUrl *string `json:"webhookUrl"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -124,10 +127,18 @@ func CreateFolder(c *gin.Context) {
 		return
 	}
 
+	// Validate the Discord webhook URL if provided (empty string clears it).
+	webhookUrl := normalizeWebhookUrl(body.WebhookUrl)
+	if webhookUrl != nil && !discordwebhook.IsValidWebhookURL(*webhookUrl) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Discord webhook URL"})
+		return
+	}
+
 	folder := models.Folder{
-		UserId: userId,
-		Name:   body.Name,
-		Color:  body.Color,
+		UserId:     userId,
+		Name:       body.Name,
+		Color:      body.Color,
+		WebhookUrl: webhookUrl,
 	}
 
 	id, err := db.CreateFolder(&folder)
@@ -156,8 +167,9 @@ func UpdateFolder(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Name  *string `json:"name"`
-		Color *string `json:"color"`
+		Name       *string `json:"name"`
+		Color      *string `json:"color"`
+		WebhookUrl *string `json:"webhookUrl"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -179,6 +191,17 @@ func UpdateFolder(c *gin.Context) {
 	}
 	if body.Color != nil {
 		updates["color"] = body.Color
+	}
+	if body.WebhookUrl != nil {
+		webhookUrl := normalizeWebhookUrl(body.WebhookUrl)
+		if webhookUrl == nil {
+			updates["webhookUrl"] = "" // empty string clears it
+		} else if discordwebhook.IsValidWebhookURL(*webhookUrl) {
+			updates["webhookUrl"] = *webhookUrl
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Discord webhook URL"})
+			return
+		}
 	}
 
 	err = db.UpdateFolder(folderId, userId, updates)
@@ -218,4 +241,16 @@ func DeleteFolder(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusOK)
+}
+
+// normalizeWebhookUrl trims a folder webhook URL; returns nil for nil/empty (meaning "unset").
+func normalizeWebhookUrl(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*s)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }

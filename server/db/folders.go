@@ -19,6 +19,52 @@ func CreateFolder(folder *models.Folder) (primitive.ObjectID, error) {
 	return result.InsertedID.(primitive.ObjectID), nil
 }
 
+// GetWebhookFoldersForEvent returns the (non-deleted) folders that contain the given event for the
+// given user AND have a Discord webhook configured. Used to broadcast event changes.
+func GetWebhookFoldersForEvent(eventId primitive.ObjectID, userId primitive.ObjectID) []models.Folder {
+	ctx := context.Background()
+
+	// Find folder ids this event is mapped into for this user.
+	cursor, err := FolderEventsCollection.Find(ctx, bson.M{"eventId": eventId, "userId": userId})
+	if err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	var mappings []models.FolderEvent
+	if err := cursor.All(ctx, &mappings); err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	if len(mappings) == 0 {
+		return nil
+	}
+	folderIds := make([]primitive.ObjectID, 0, len(mappings))
+	for _, m := range mappings {
+		folderIds = append(folderIds, m.FolderId)
+	}
+
+	// Fetch the folders that have a webhook configured.
+	fc, err := FoldersCollection.Find(ctx, bson.M{
+		"_id":        bson.M{"$in": folderIds},
+		"userId":     userId,
+		"webhookUrl": bson.M{"$exists": true, "$nin": bson.A{"", nil}},
+		"$or": bson.A{
+			bson.M{"isDeleted": bson.M{"$exists": false}},
+			bson.M{"isDeleted": false},
+		},
+	})
+	if err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	var folders []models.Folder
+	if err := fc.All(ctx, &folders); err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	return folders
+}
+
 func GetFolderById(folderId primitive.ObjectID, userId primitive.ObjectID) (*models.Folder, error) {
 	var folder models.Folder
 	err := FoldersCollection.FindOne(context.Background(), bson.M{
