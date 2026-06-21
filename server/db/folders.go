@@ -82,12 +82,43 @@ func GetFolderById(folderId primitive.ObjectID, userId primitive.ObjectID) (*mod
 	return &folder, nil
 }
 
+// GetReadableFolderById returns a folder the user is allowed to read: their own, or any public
+// folder. Returns an error if not found / not readable.
+func GetReadableFolderById(folderId primitive.ObjectID, userId primitive.ObjectID) (*models.Folder, error) {
+	var folder models.Folder
+	err := FoldersCollection.FindOne(context.Background(), bson.M{
+		"_id": folderId,
+		"$and": bson.A{
+			bson.M{"$or": bson.A{
+				bson.M{"isDeleted": bson.M{"$exists": false}},
+				bson.M{"isDeleted": false},
+			}},
+			bson.M{"$or": bson.A{
+				bson.M{"userId": userId},
+				bson.M{"isPublic": true},
+			}},
+		},
+	}).Decode(&folder)
+	if err != nil {
+		return nil, err
+	}
+	return &folder, nil
+}
+
 func GetAllFolders(userId primitive.ObjectID) ([]models.Folder, error) {
+	notDeleted := bson.A{
+		bson.M{"isDeleted": bson.M{"$exists": false}},
+		bson.M{"isDeleted": false},
+	}
+
+	// The caller's own folders, plus any public folders owned by others (read-only).
 	cursor, err := FoldersCollection.Find(context.Background(), bson.M{
-		"userId": userId,
-		"$or": bson.A{
-			bson.M{"isDeleted": bson.M{"$exists": false}},
-			bson.M{"isDeleted": false},
+		"$and": bson.A{
+			bson.M{"$or": notDeleted},
+			bson.M{"$or": bson.A{
+				bson.M{"userId": userId},
+				bson.M{"isPublic": true},
+			}},
 		},
 	})
 	if err != nil {
@@ -99,8 +130,10 @@ func GetAllFolders(userId primitive.ObjectID) ([]models.Folder, error) {
 		return nil, err
 	}
 
-	for i, folder := range folders {
-		events, err := GetEventsInFolder(folder.Id, userId)
+	for i := range folders {
+		// Events are mapped per owner, so fetch using the folder's owner (works for public folders
+		// viewed by non-owners too).
+		events, err := GetEventsInFolder(folders[i].Id, folders[i].UserId)
 		if err != nil {
 			return nil, err
 		}
@@ -108,6 +141,10 @@ func GetAllFolders(userId primitive.ObjectID) ([]models.Folder, error) {
 			folders[i].EventIds = events
 		} else {
 			folders[i].EventIds = []primitive.ObjectID{}
+		}
+		// Never expose another user's webhook URL (it embeds a secret token).
+		if folders[i].UserId != userId {
+			folders[i].WebhookUrl = nil
 		}
 	}
 
@@ -196,4 +233,53 @@ func DeleteFolder(folderId primitive.ObjectID, userId primitive.ObjectID) error 
 	}
 
 	return nil
+}
+
+// GetEventIdsInPublicFolders returns the IDs of all events mapped into any public (non-deleted)
+// folder. Used so events shared via a public folder are visible (read-only) to every signed-in user.
+func GetEventIdsInPublicFolders() []primitive.ObjectID {
+	ctx := context.Background()
+
+	// Public folder ids.
+	fc, err := FoldersCollection.Find(ctx, bson.M{
+		"isPublic": true,
+		"$or": bson.A{
+			bson.M{"isDeleted": bson.M{"$exists": false}},
+			bson.M{"isDeleted": false},
+		},
+	}, options.Find().SetProjection(bson.M{"_id": 1, "userId": 1}))
+	if err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	var folders []models.Folder
+	if err := fc.All(ctx, &folders); err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	if len(folders) == 0 {
+		return nil
+	}
+
+	// Event ids mapped into those folders (by the folder owner).
+	ors := bson.A{}
+	for _, f := range folders {
+		ors = append(ors, bson.M{"folderId": f.Id, "userId": f.UserId})
+	}
+	ec, err := FolderEventsCollection.Find(ctx, bson.M{"$or": ors},
+		options.Find().SetProjection(bson.M{"eventId": 1}))
+	if err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	var mappings []models.FolderEvent
+	if err := ec.All(ctx, &mappings); err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	ids := make([]primitive.ObjectID, 0, len(mappings))
+	for _, m := range mappings {
+		ids = append(ids, m.EventId)
+	}
+	return ids
 }

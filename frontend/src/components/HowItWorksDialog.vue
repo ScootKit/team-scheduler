@@ -1,18 +1,15 @@
 <template>
   <v-dialog v-model="dialog" max-width="800px" content-class="tw-m-0 pa-0">
-    <div class="video-container">
-      <iframe
-        width="100%"
-        height="100%"
-        src="https://www.youtube.com/embed/vFkBC8BrkOk?si=pF64JAIyDhom_1do&autoplay=1"
-        title="YouTube video player - How WannPassts Works"
-        frameborder="0"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        referrerpolicy="strict-origin-when-cross-origin"
-        allowfullscreen
-      >
-      </iframe>
-    </div>
+    <v-card>
+      <v-card-text class="tw-py-6 tw-text-very-dark-gray">
+        How WannPassts works: create an event, share the link, and everyone
+        marks their availability so you can find the best time to meet.
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer></v-spacer>
+        <v-btn color="primary" text @click="dialog = false">Got it!</v-btn>
+      </v-card-actions>
+    </v-card>
   </v-dialog>
 </template>
 
@@ -34,21 +31,3 @@ export default {
   },
 }
 </script>
-
-<style scoped>
-.video-container {
-  position: relative;
-  padding-bottom: 56.25%; /* 16:9 aspect ratio */
-  height: 0;
-  overflow: hidden;
-  background-color: #000; /* Optional: background for when video loads */
-}
-
-.video-container iframe {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-}
-</style>

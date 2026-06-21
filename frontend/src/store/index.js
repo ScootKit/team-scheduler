@@ -106,11 +106,13 @@ export default new Vuex.Store({
     addFolder(state, folder) {
       state.folders.push(folder)
     },
-    updateFolder(state, { folderId, name, color }) {
+    updateFolder(state, { folderId, name, color, webhookUrl, isPublic }) {
       const folder = state.folders.find((f) => f._id === folderId)
       if (folder) {
         folder.name = name
         folder.color = color
+        folder.webhookUrl = webhookUrl
+        folder.isPublic = isPublic
       }
     },
     removeFolder(state, folderId) {
@@ -223,27 +225,46 @@ export default new Vuex.Store({
         console.error(err)
       }
     },
-    async createFolder({ commit, dispatch }, { name, color }) {
+    async createFolder(
+      { commit, state, dispatch },
+      { name, color, webhookUrl, isPublic }
+    ) {
       try {
-        const folder = await createFolder(name, color)
+        const folder = await createFolder(name, color, webhookUrl, isPublic)
         commit("addFolder", {
           _id: folder.id,
           name,
           color,
+          webhookUrl,
+          isPublic,
+          userId: state.authUser?._id,
           eventIds: [],
         })
+        return true
       } catch (err) {
-        dispatch("showError", "There was a problem creating the folder!")
+        dispatch(
+          "showError",
+          err?.parsed?.error || "There was a problem creating the folder!"
+        )
         console.error(err)
+        return false
       }
     },
-    async updateFolder({ commit, dispatch }, { folderId, name, color }) {
+    async updateFolder(
+      { commit, dispatch },
+      { folderId, name, color, webhookUrl, isPublic }
+    ) {
       try {
-        await updateFolder(folderId, name, color)
-        commit("updateFolder", { folderId, name, color })
+        await updateFolder(folderId, name, color, webhookUrl, isPublic)
+        commit("updateFolder", { folderId, name, color, webhookUrl, isPublic })
+        return true
       } catch (err) {
-        dispatch("showError", "There was a problem updating the folder!")
+        dispatch(
+          "showError",
+          err?.parsed?.error || "There was a problem updating the folder!"
+        )
         console.error(err)
+        return false
       }
     },
     async deleteFolder({ commit, dispatch }, folderId) {

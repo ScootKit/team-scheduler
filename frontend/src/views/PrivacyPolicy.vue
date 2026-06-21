@@ -1,17 +1,23 @@
 <template>
-  <iframe
-    src="https://docs.google.com/document/d/1WfcSi7FkNACWsm31sUiIcgpqIWWJ0mMm7qqma_x0kIM/preview"
-    style="width: 100%; height: 100%; position: absolute; left: 0"
-    frameborder="0"
-  ></iframe>
+  <div class="tw-flex tw-h-full tw-items-center tw-justify-center tw-p-8">
+    <p class="tw-text-very-dark-gray">Privacy policy not configured.</p>
+  </div>
 </template>
 
 <script>
+import { privacyPolicyUrl } from "@/constants"
+
 export default {
   name: "PrivacyPolicy",
 
   metaInfo: {
     title: "Privacy Policy - WannPassts",
+  },
+
+  mounted() {
+    if (privacyPolicyUrl) {
+      window.location.replace(privacyPolicyUrl)
+    }
   },
 }
 </script>

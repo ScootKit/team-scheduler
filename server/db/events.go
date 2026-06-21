@@ -215,7 +215,7 @@ func GuestNameExists(eventId string, guestName string) bool {
 
 	// Check if the name is a valid ObjectID that corresponds to an existing user
 	// If so, block it to prevent conflicts
-	//NOTE: we're checking against ALL logged in users because in case we allowed this, and a user with an account tried to 
+	//NOTE: we're checking against ALL logged in users because in case we allowed this, and a user with an account tried to
 	// submit their availability, overwriting would happen and we'd lose data.
 	objectId, err := primitive.ObjectIDFromHex(guestName)
 	if err == nil {
@@ -226,7 +226,6 @@ func GuestNameExists(eventId string, guestName string) bool {
 			return true
 		}
 	}
-
 
 	// For events, check EventResponsesCollection
 	eventObjectId, err := primitive.ObjectIDFromHex(event.Id.Hex())
@@ -254,4 +253,44 @@ func GuestNameExists(eventId string, guestName string) bool {
 
 	// userId can be parsed as ObjectID, so it's a logged-in user, not a guest
 	return false
+}
+
+// GetEventsDueForStartNotification returns scheduled events whose start time has just arrived
+// (within [now-grace, now]) and that have not yet had a "starting now" notification sent for the
+// current scheduled start. The grace window prevents firing stale notifications for events whose
+// start was missed while the server was down.
+func GetEventsDueForStartNotification(now time.Time, grace time.Duration) []models.Event {
+	windowStart := primitive.NewDateTimeFromTime(now.Add(-grace))
+	nowDt := primitive.NewDateTimeFromTime(now)
+
+	cursor, err := EventsCollection.Find(context.Background(), bson.M{
+		"scheduledEvent.startDate": bson.M{"$gte": windowStart, "$lte": nowDt},
+		"$expr":                    bson.M{"$ne": bson.A{"$startNotifiedFor", "$scheduledEvent.startDate"}},
+		"$or": bson.A{
+			bson.M{"isDeleted": bson.M{"$exists": false}},
+			bson.M{"isDeleted": false},
+		},
+	})
+	if err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	var events []models.Event
+	if err := cursor.All(context.Background(), &events); err != nil {
+		logger.StdErr.Println(err)
+		return nil
+	}
+	return events
+}
+
+// MarkStartNotified records that the "starting now" notification has been sent for the given
+// scheduled start, so it isn't sent again (until the event is rescheduled to a different time).
+func MarkStartNotified(eventId primitive.ObjectID, startDate primitive.DateTime) {
+	_, err := EventsCollection.UpdateOne(context.Background(),
+		bson.M{"_id": eventId},
+		bson.M{"$set": bson.M{"startNotifiedFor": startDate}},
+	)
+	if err != nil {
+		logger.StdErr.Println(err)
+	}
 }

@@ -3,6 +3,7 @@ import {
   timeTypes,
   dayIndexToDayString,
   calendarTypes,
+  allTimezones,
 } from "@/constants"
 import { get } from "./fetch_utils"
 import { isBetween } from "./general_utils"
@@ -15,20 +16,92 @@ dayjs.extend(timezonePlugin)
   Date utils 
 */
 
-/** Returns a human-readable local date + time string for a response deadline,
- *  e.g. "Mon, May 14, 2025, 11:59 PM". Returns "" for invalid/empty input. */
-export const formatResponseDeadline = (deadline) => {
+/** Returns a human-readable date + time string for a response deadline,
+ *  e.g. "Mon, May 14, 2025, 11:59 PM PDT". Renders the absolute instant in the
+ *  given IANA timezone (with an explicit short timezone label) when `tzName` is
+ *  provided; otherwise falls back to the browser's local timezone (no label,
+ *  backward-compatible). Returns "" for invalid/empty input. */
+export const formatResponseDeadline = (deadline, tzName = null) => {
   if (!deadline) return ""
   const date = new Date(deadline)
   if (isNaN(date.getTime())) return ""
-  return date.toLocaleString(getLocale(), {
+  const opts = {
     weekday: "short",
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  })
+  }
+  if (tzName) {
+    opts.timeZone = tzName
+    opts.timeZoneName = "short"
+  }
+  return date.toLocaleString(getLocale(), opts)
+}
+
+/** Renders an absolute UTC instant in a specific IANA timezone WITH an explicit
+ *  short timezone label (e.g. "Mon, 22 Jun 2026, 23:59 CEST"). This is the
+ *  canonical formatter for scheduled-times and deadlines so every viewer sees
+ *  the same wall-clock + label regardless of their browser timezone.
+ *  @param {Date|string|number} utcIso - the absolute instant (UTC ISO string, Date, or ms)
+ *  @param {string} tzName - IANA timezone name (e.g. "America/Los_Angeles"). Falls
+ *    back to the browser zone when empty.
+ *  @param {Object} [opts] - overrides for Intl.DateTimeFormat options.
+ *  @returns {string} formatted string, or "" for invalid/empty input. */
+export const formatInTimezone = (utcIso, tzName, opts = {}) => {
+  if (!utcIso) return ""
+  const date = new Date(utcIso)
+  if (isNaN(date.getTime())) return ""
+  const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const timeZone = tzName || browserTz
+  // Only show a timezone label when the rendered wall-clock actually differs from the viewer's
+  // browser time at this instant — i.e. the two zones have different UTC offsets. Comparing
+  // offsets (not IANA names) means a reset-to-local or an offset-equivalent zone never shows a
+  // spurious label. DST-aware because it evaluates at `date`.
+  let offsetsDiffer
+  try {
+    const inZone = new Date(date.toLocaleString("en-US", { timeZone }))
+    const inBrowser = new Date(
+      date.toLocaleString("en-US", { timeZone: browserTz })
+    )
+    offsetsDiffer = inZone.getTime() !== inBrowser.getTime()
+  } catch (e) {
+    offsetsDiffer = timeZone !== browserTz
+  }
+  const showLabel = opts.withLabel ?? offsetsDiffer
+  const o = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+    ...opts,
+  }
+  delete o.withLabel
+  if (showLabel) o.timeZoneName = "short"
+  return date.toLocaleString(getLocale(), o)
+}
+
+/** Builds a timezone-selector object ({value, label, gmtString, offset}) for the given IANA
+ *  timezone name, computing the GMT offset at the given reference date. Returns null if the name
+ *  isn't a known timezone. Used to set the selector to an event's stored timezone when editing. */
+export const getTimezoneObject = (ianaName, referenceDate = new Date()) => {
+  if (!ianaName || !allTimezones[ianaName]) return null
+  try {
+    const min = dayjs(referenceDate).tz(ianaName).utcOffset()
+    const hr = `${(min / 60) ^ 0}:${min % 60 === 0 ? "00" : Math.abs(min % 60)}`
+    const gmtString = `(GMT${hr.includes("-") ? hr : `+${hr}`})`
+    return {
+      value: ianaName,
+      label: allTimezones[ianaName],
+      gmtString,
+      offset: min,
+    }
+  } catch (e) {
+    return null
+  }
 }
 
 /** Returns a relative countdown to a future deadline, e.g. "in 5 minutes",

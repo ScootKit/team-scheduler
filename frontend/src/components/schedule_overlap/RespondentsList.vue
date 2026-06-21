@@ -174,6 +174,23 @@
                   }}
                 </div>
                 <div
+                  v-if="respondentTimezoneLabel(user)"
+                  class="tw-flex tw-flex-col tw-text-xs tw-leading-tight tw-text-dark-gray"
+                >
+                  <span class="tw-flex tw-items-center tw-whitespace-nowrap">
+                    <v-icon x-small class="tw-mr-0.5 tw-text-dark-gray"
+                      >mdi-clock-outline</v-icon
+                    >
+                    {{ respondentTimezoneLabel(user) }}
+                  </span>
+                  <span
+                    v-if="respondentHoveredTime(user)"
+                    class="tw-whitespace-nowrap tw-pl-[18px] tw-font-medium tw-text-black"
+                  >
+                    {{ respondentHoveredTime(user) }} their time
+                  </span>
+                </div>
+                <div
                   v-if="isOwner && event.collectEmails"
                   class="email-hover-target tw-flex tw-items-center tw-rounded-sm tw-p-px tw-text-xs tw-text-dark-gray tw-transition-all hover:tw-bg-light-gray"
                   :class="respondentClass(user._id)"
@@ -588,6 +605,22 @@ export default {
     respondentsListMaxHeight() {
       return Math.max(this.desktopMaxHeight, this.respondentsListMinHeight)
     },
+    /** Offset (minutes behind UTC, JS getTimezoneOffset convention) of the timezone currently
+     *  selected in the "shown in" dropdown. Respondent "Nh ahead/behind" labels are computed
+     *  relative to THIS, so they update when the dropdown changes — not the browser zone.
+     *  DST-aware via a reference date, and convention-independent of the timezone object. */
+    referenceOffsetMinutes() {
+      const iana = this.timezone?.value
+      if (!iana) return new Date().getTimezoneOffset()
+      try {
+        const ref = this.curDate || new Date(this.event?.dates?.[0] || Date.now())
+        const utcWall = new Date(ref.toLocaleString("en-US", { timeZone: "UTC" }))
+        const tzWall = new Date(ref.toLocaleString("en-US", { timeZone: iana }))
+        return Math.round((utcWall - tzWall) / 60000)
+      } catch (e) {
+        return new Date().getTimezoneOffset()
+      }
+    },
   },
 
   methods: {
@@ -634,6 +667,67 @@ export default {
     /** Returns whether the user is a guest */
     isGuest(user) {
       return user._id == user.firstName
+    },
+    /** Returns a short timezone label (e.g. "GMT+8 · 9h ahead") for a respondent, but only when
+     *  their timezone is known AND differs from the timezone currently selected in the "shown in"
+     *  dropdown — so the relative part updates when you change that dropdown, and the label hides
+     *  when you're viewing in their zone. Returns "" otherwise. `timezoneOffset` follows JS
+     *  getTimezoneOffset (minutes, positive = behind UTC). */
+    /** Formats a JS getTimezoneOffset value (minutes behind UTC) as a GMT label with minutes when
+     *  needed: -330 -> "GMT+5:30", -345 -> "GMT+5:45", 480 -> "GMT-8". Handles half- and
+     *  45-minute zones correctly (decimal hours would render "GMT+5.5"). */
+    formatGmtOffset(off) {
+      const totalMin = -off // minutes ahead of UTC
+      const sign = totalMin >= 0 ? "+" : "-"
+      const abs = Math.abs(totalMin)
+      const h = Math.floor(abs / 60)
+      const m = abs % 60
+      return m === 0
+        ? `GMT${sign}${h}`
+        : `GMT${sign}${h}:${String(m).padStart(2, "0")}`
+    },
+    respondentTimezoneLabel(user) {
+      const off = user?.timezoneOffset
+      if (off === undefined || off === null) return ""
+      const myOff = this.referenceOffsetMinutes
+      if (off === myOff) return ""
+      const gmt = this.formatGmtOffset(off)
+      // hours they are ahead of the selected "shown in" zone (may be fractional for half-hour zones)
+      const diff = (myOff - off) / 60
+      const diffLabel = Number.isInteger(diff) ? Math.abs(diff) : Math.abs(diff).toFixed(2).replace(/\.?0+$/, "")
+      const ahead =
+        diff === 0 ? "" : ` · ${diffLabel}h ${diff > 0 ? "ahead" : "behind"}`
+      return `${gmt}${ahead}`
+    },
+    /** When a timeslot is hovered, returns "3:00 PM" — the hovered instant rendered as the
+     *  respondent's own wall-clock time (using their stored offset). Returns "" when no slot is
+     *  hovered, the event is days-only, or the respondent has no known timezone. */
+    respondentHoveredTime(user) {
+      if (!this.curDate || this.event.daysOnly) return ""
+      const off = user?.timezoneOffset
+      if (off === undefined || off === null) return ""
+      // local wall clock = UTC instant minus the offset (minutes behind UTC).
+      const shifted = new Date(this.curDate.getTime() - off * 60000)
+      let h = shifted.getUTCHours()
+      const m = shifted.getUTCMinutes()
+      const ampm = h >= 12 ? "PM" : "AM"
+      h = h % 12 || 12
+      const mm = m.toString().padStart(2, "0")
+      return `${h}:${mm} ${ampm}`
+    },
+    /** Absolute "GMT+2" style label for a respondent's stored offset (no viewer-relative part),
+     *  for use in the CSV export. Returns "" when the offset is unknown. */
+    respondentGmtLabel(user) {
+      const off = user?.timezoneOffset
+      if (off === undefined || off === null) return ""
+      return this.formatGmtOffset(off)
+    },
+    /** "First Last (GMT+2)" for CSV column headers / name cells; drops the parenthetical when the
+     *  respondent's timezone is unknown. */
+    respondentCsvName(user) {
+      const name = `${user.firstName} ${user.lastName}`
+      const tz = this.respondentGmtLabel(user)
+      return tz ? `${name} (${tz})` : name
     },
     /** Shows the delete availability dialog */
     showDeleteAvailabilityDialog(user) {
@@ -689,9 +783,7 @@ export default {
       if (this.exportCsvDialog.type === "datesToAvailable") {
         // Write CSV header
         const header = ["Date / Time"]
-        header.push(
-          ...responses.map((r) => r.user.firstName + " " + r.user.lastName)
-        )
+        header.push(...responses.map((r) => this.respondentCsvName(r.user)))
         csv.push(header)
 
         // Iterate through the dates
@@ -727,7 +819,7 @@ export default {
         // Iterate through the responses
         for (const response of responses) {
           // The first row is the name
-          const row = [`${response.user.firstName} ${response.user.lastName}`]
+          const row = [this.respondentCsvName(response.user)]
 
           // Iterate through the dates
           for (const date of this.event.dates) {

@@ -56,6 +56,7 @@ func getProfile(c *gin.Context) {
 	// Get number of events created this month
 	eventsCreatedThisMonth := db.GetEventsCreatedThisMonth(user.Id)
 	user.NumEventsCreated = eventsCreatedThisMonth
+	user.IsAdmin = utils.IsAdminEmailDomain(user.Email)
 
 	db.UpdateDailyUserLog(user)
 
@@ -190,6 +191,13 @@ func getEvents(c *gin.Context) {
 		}
 	}
 
+	// Include events shared via any public folder so they're visible (read-only) on the dashboard.
+	for _, id := range db.GetEventIdsInPublicFolders() {
+		if !utils.Contains(eventIds, id) {
+			eventIds = append(eventIds, id)
+		}
+	}
+
 	cursor, err = db.EventsCollection.Find(
 		context.Background(),
 		bson.M{
@@ -293,7 +301,8 @@ func setEventFolder(c *gin.Context) {
 					URL:   eventUrl,
 					Color: discordwebhook.ColorBlue,
 				}
-				go discordwebhook.SendEmbed(*folder.WebhookUrl, embed)
+				button := discordwebhook.Button{Label: "🗳️ Enter your availability", URL: eventUrl}
+				go discordwebhook.SendEmbed(*folder.WebhookUrl, embed, button)
 			}
 		}
 	}

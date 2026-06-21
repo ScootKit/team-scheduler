@@ -31,7 +31,7 @@
               @keyup.enter="submit"
               :rules="nameRules"
               placeholder="Enter your name..."
-              autofocus
+              :autofocus="$autofocusEnabled"
               hide-details="auto"
               autocomplete="off"
               solo

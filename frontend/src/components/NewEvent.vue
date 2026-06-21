@@ -55,7 +55,7 @@
           solo
           @keyup.enter="blurNameField"
           :rules="nameRules"
-          autofocus
+          :autofocus="$autofocusEnabled"
           required
         />
 
@@ -328,6 +328,9 @@
                     :disabled="!responseDeadlineDate"
                   />
                 </div>
+                <div class="tw-mt-1 tw-text-xs tw-text-dark-gray">
+                  Times in {{ this.timezone.gmtString || this.timezone.value }}
+                </div>
               </div>
             </div>
           </ExpandableSection>
@@ -383,6 +386,8 @@ import {
   signInGoogle,
   getDateWithTimezone,
   getTimeOptions,
+  convertToUTC,
+  getTimezoneObject,
   addEventToCreatedList,
   prefersStartOnMonday,
 } from "@/utils"
@@ -552,13 +557,21 @@ export default {
         { text: "60 min", value: 60 },
       ]
     },
-    /** Combined response deadline as an ISO string, or null when unset */
+    /** Combined response deadline as an ISO string, or null when unset.
+     *  The picked date+time is interpreted in the EVENT's selected timezone (not
+     *  the browser's), so the deadline is stored at the correct absolute instant
+     *  regardless of the creator's browser timezone. */
     responseDeadline() {
       if (!this.responseDeadlineDate) return null
       const time = this.responseDeadlineTime || "23:59"
-      const d = new Date(`${this.responseDeadlineDate}T${time}`)
-      if (isNaN(d.getTime())) return null
-      return d.toISOString()
+      try {
+        return convertToUTC(
+          `${this.responseDeadlineDate} ${time}`,
+          this.timezone.value
+        ).toISOString()
+      } catch (err) {
+        return null
+      }
     },
   },
 
@@ -675,6 +688,7 @@ export default {
         startOnMonday: this.startOnMonday,
         timeIncrement: this.timeIncrement,
         responseDeadline: this.responseDeadline,
+        timezone: this.timezone.value,
         creatorPosthogId: this.$posthog?.get_distinct_id(),
       }
 
@@ -806,6 +820,17 @@ export default {
       if (this.event) {
         this.name = this.event.name
 
+        // Load the event's stored timezone into the selector so editing (and the
+        // deadline interpretation on save) happens in the SAME timezone the event
+        // was created in — not the editor's browser timezone.
+        if (this.event.timezone) {
+          const tzObj = getTimezoneObject(
+            this.event.timezone,
+            new Date(this.event.dates?.[0] || Date.now())
+          )
+          if (tzObj) this.timezone = tzObj
+        }
+
         // Set start time, accounting for the timezone
         this.startTime = Math.floor(
           dateToTimeNum(getDateWithTimezone(this.event.dates[0]), true)
@@ -822,17 +847,21 @@ export default {
         this.topicsEnabled = this.event.topicsEnabled !== false
         this.timeIncrement = this.event.timeIncrement ?? 15
 
-        // Initialize response deadline from the existing event (if set)
+        // Initialize response deadline from the existing event (if set).
+        // The stored deadline is an absolute UTC instant; render it back into the
+        // date/time inputs using the EVENT's timezone (falling back to the picked
+        // timezone / browser zone) so the wall-clock the creator sees matches what
+        // was saved, independent of their browser timezone.
         if (this.event.responseDeadline) {
           const deadline = new Date(this.event.responseDeadline)
           if (!isNaN(deadline.getTime())) {
-            const pad = (n) => String(n).padStart(2, "0")
-            this.responseDeadlineDate = `${deadline.getFullYear()}-${pad(
-              deadline.getMonth() + 1
-            )}-${pad(deadline.getDate())}`
-            this.responseDeadlineTime = `${pad(deadline.getHours())}:${pad(
-              deadline.getMinutes()
-            )}`
+            const tzName =
+              this.event.timezone ||
+              this.timezone?.value ||
+              Intl.DateTimeFormat().resolvedOptions().timeZone
+            const d = dayjs(deadline).tz(tzName)
+            this.responseDeadlineDate = d.format("YYYY-MM-DD")
+            this.responseDeadlineTime = d.format("HH:mm")
           }
         } else {
           this.clearResponseDeadline()

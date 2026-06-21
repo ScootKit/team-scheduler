@@ -57,6 +57,13 @@ func Init() func() {
 	}
 	OtpCodesCollection.Indexes().CreateOne(context.Background(), otpIndexModel)
 
+	// Index folderEvents by folderId — the public-folder dashboard query fetches all event ids
+	// across many folders via {folderId: {$in: [...]}}, and GetEventsInFolder looks up by folderId.
+	// Without this the query scans the whole collection as public folders / events grow.
+	FolderEventsCollection.Indexes().CreateOne(context.Background(), mongo.IndexModel{
+		Keys: bson.M{"folderId": 1},
+	})
+
 	// Return a function to close the connection
 	return func() {
 		Client.Disconnect(ctx)

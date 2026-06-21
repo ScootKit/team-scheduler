@@ -30,21 +30,6 @@
           That's it! The date range, time range, and ALL THE EXISTING RESPONSES
           will be copied over as well.
         </p>
-
-        <p class="tw-mb-2 tw-font-medium">Watch how to do it:</p>
-        <div class="video-container tw-mb-4">
-          <!-- Replace YOUR_YOUTUBE_VIDEO_ID with the actual ID -->
-          <iframe
-            width="560"
-            height="315"
-            src="https://www.youtube.com/embed/k7t4ZplhtT8?si=oBv7cevr6gsz09wp"
-            title="YouTube video player"
-            frameborder="0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            referrerpolicy="strict-origin-when-cross-origin"
-            allowfullscreen
-          ></iframe>
-        </div>
       </v-card-text>
       <v-card-actions>
         <v-spacer></v-spacer>
@@ -72,20 +57,3 @@ export default {
   },
 }
 </script>
-
-<style scoped>
-.video-container {
-  position: relative;
-  padding-bottom: 56.25%; /* 16:9 aspect ratio */
-  height: 0;
-  overflow: hidden;
-}
-
-.video-container iframe {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-}
-</style>

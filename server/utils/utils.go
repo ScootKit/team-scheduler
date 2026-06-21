@@ -180,6 +180,31 @@ func IsApprovedEmailDomain(email string) bool {
 	return false
 }
 
+// IsAdminEmailDomain reports whether the given email belongs to one of the domains in the
+// ADMIN_EMAIL_DOMAINS env var (comma-separated). Used to gate privileged actions like creating
+// public folders. Unlike the sign-in allowlist, an empty/unset value permits NO ONE (fail-closed) —
+// admin powers must be explicitly granted.
+func IsAdminEmailDomain(email string) bool {
+	allowed := strings.TrimSpace(os.Getenv("ADMIN_EMAIL_DOMAINS"))
+	if allowed == "" {
+		return false
+	}
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return false
+	}
+	domain := strings.ToLower(strings.TrimSpace(email[at+1:]))
+	if domain == "" {
+		return false
+	}
+	for _, d := range strings.Split(allowed, ",") {
+		if domain == strings.ToLower(strings.TrimSpace(d)) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetCalendarAccountKey builds the map key for calendarAccounts. Email-like identifiers are lowercased;
 // ICS uses the feed label as the first segment and is only trimmed, not lowercased.
 func GetCalendarAccountKey(ident string, calendarType models.CalendarType) string {

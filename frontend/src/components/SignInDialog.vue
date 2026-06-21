@@ -85,7 +85,7 @@
             placeholder="First name"
             solo
             hide-details="auto"
-            autofocus
+            :autofocus="$autofocusEnabled"
             @keydown.enter="$refs.lastNameField && $refs.lastNameField.focus()"
             class="tw-mb-3"
           />
@@ -148,7 +148,7 @@
             maxlength="6"
             :error-messages="otpError"
             @keydown.enter="verifyOtp"
-            autofocus
+            :autofocus="$autofocusEnabled"
             class="tw-mb-2"
           />
           <v-btn

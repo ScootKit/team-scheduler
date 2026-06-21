@@ -25,6 +25,14 @@ Vue.use(VueWorker)
 
 Vue.config.productionTip = false
 
+// Whether inputs should auto-focus on mount. Disabled on touch devices (phones/tablets) so that
+// opening a page/dialog doesn't pop up the on-screen keyboard. Bind via :autofocus="$autofocusEnabled".
+Vue.prototype.$autofocusEnabled = !(
+  typeof window !== "undefined" &&
+  window.matchMedia &&
+  window.matchMedia("(pointer: coarse)").matches
+)
+
 new Vue({
   router,
   store,

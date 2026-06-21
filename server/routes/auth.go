@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/sessions"
@@ -17,7 +18,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"schej.it/server/db"
 	"schej.it/server/errs"
 	"schej.it/server/logger"
@@ -29,6 +29,43 @@ import (
 	"schej.it/server/services/listmonk"
 	"schej.it/server/utils"
 )
+
+// otpSendCooldown is the minimum interval between OTP emails sent to the same address.
+const otpSendCooldown = 30 * time.Second
+
+// otpSendGuard serializes the per-email rate-limit decision so concurrent
+// requests for the same address can't race past the cooldown check and bomb an
+// inbox. lastOtpSentAt records the last time we committed to sending a code for
+// a given email.
+var (
+	otpSendGuard  sync.Mutex
+	lastOtpSentAt = make(map[string]time.Time)
+)
+
+// reserveOtpSend atomically checks whether an OTP may be sent to email right now.
+// If the previous send for this email was within otpSendCooldown it returns false
+// (the caller should reject with a 429). Otherwise it records the current time as
+// the last send and returns true. It also opportunistically prunes stale entries
+// to keep the map from growing unbounded.
+func reserveOtpSend(email string) bool {
+	otpSendGuard.Lock()
+	defer otpSendGuard.Unlock()
+
+	now := time.Now()
+	if last, ok := lastOtpSentAt[email]; ok && now.Sub(last) < otpSendCooldown {
+		return false
+	}
+
+	// Prune entries whose cooldown has long expired to bound memory usage.
+	for e, t := range lastOtpSentAt {
+		if now.Sub(t) > otpSendCooldown {
+			delete(lastOtpSentAt, e)
+		}
+	}
+
+	lastOtpSentAt[email] = now
+	return true
+}
 
 func InitAuth(router *gin.RouterGroup) {
 	authRouter := router.Group("/auth")
@@ -83,6 +120,7 @@ func signIn(c *gin.Context) {
 		}
 	}
 
+	user.IsAdmin = utils.IsAdminEmailDomain(user.Email)
 	c.JSON(http.StatusOK, user)
 }
 
@@ -399,14 +437,11 @@ func sendOtp(c *gin.Context) {
 	// email within the cooldown window. Without this, the endpoint can be
 	// abused to bomb arbitrary inboxes with OTP emails (and to enumerate
 	// accounts by timing). The 5-attempt cap on verification is unaffected.
-	const otpSendCooldown = 30 * time.Second
-	var lastOtp models.OtpCode
-	findErr := db.OtpCodesCollection.FindOne(
-		context.Background(),
-		bson.M{"email": email},
-		options.FindOne().SetSort(bson.M{"createdAt": -1}),
-	).Decode(&lastOtp)
-	if findErr == nil && time.Since(lastOtp.CreatedAt) < otpSendCooldown {
+	//
+	// The decision is made under a per-process mutex (reserveOtpSend) so that
+	// concurrent requests for the same email serialize and the cooldown check
+	// can't race. We reserve BEFORE doing any DB work or sending mail.
+	if !reserveOtpSend(email) {
 		c.JSON(http.StatusTooManyRequests, responses.Error{Error: errs.OtpRateLimited})
 		return
 	}
@@ -552,5 +587,8 @@ func verifyOtp(c *gin.Context) {
 	session.Save()
 
 	user := db.GetUserById(userId.Hex())
+	if user != nil {
+		user.IsAdmin = utils.IsAdminEmailDomain(user.Email)
+	}
 	c.JSON(http.StatusOK, user)
 }

@@ -1,7 +1,5 @@
 <template>
   <span>
-    <!-- Video Ad (desktop only, when ads enabled) -->
-    <div v-if="!isPhone && showAds" ref="videoAdContainer"></div>
     <div v-if="event" class="tw-mt-8 tw-h-full">
       <!-- Mark availability option dialog -->
       <MarkAvailabilityDialog
@@ -49,6 +47,7 @@
         v-model="scheduleEventDialog"
         :event="event"
         :prefill="schedulePrefill"
+        :timezone="scheduleDialogTimezone"
         @scheduled="onEventScheduled"
         @cleared="onEventScheduleCleared"
       />
@@ -100,21 +99,6 @@
       <div
         class="tw-mx-auto tw-mt-4 lg:tw-flex lg:tw-items-start lg:tw-justify-center lg:tw-gap-6"
       >
-        <PubliftAd
-          :showAd="showAds"
-          fuseId="meet_vrec_lhs"
-          class="tw-hidden publift-l:tw-block"
-        >
-          <div
-            class="tw-h-[600px] publift-l:tw-w-[160px] publift-xl:tw-w-[300px]"
-          >
-            <div
-              id="meet_vrec_lhs"
-              data-fuse="meet_vrec_lhs"
-              class="tw-flex tw-items-center tw-justify-center"
-            ></div>
-          </div>
-        </PubliftAd>
         <div class="tw-mx-auto tw-max-w-5xl tw-flex-1">
           <div v-if="!isSettingSpecificTimes" class="tw-mx-4">
             <!-- Title and copy link -->
@@ -332,7 +316,12 @@
                   This event is scheduled for
                 </div>
                 <div class="tw-text-base tw-font-semibold tw-text-black">
-                  📅 {{ scheduledEventStartFormatted }}
+                  📅 {{ scheduledEventStartFormatted
+                  }}<span
+                    v-if="scheduledRelative"
+                    class="tw-ml-1 tw-font-medium tw-text-green"
+                    >({{ scheduledRelative }})</span
+                  >
                 </div>
               </div>
             </div>
@@ -364,6 +353,7 @@
             :weekOffset.sync="weekOffset"
             :curGuestId="curGuestId"
             :initial-timezone="initialTimezone"
+            @update:selectedTimezone="selectedTimezone = $event"
             :addingAvailabilityAsGuest="addingAvailabilityAsGuest"
             @addAvailability="addAvailability"
             @addAvailabilityAsGuest="addAvailabilityAsGuest"
@@ -375,21 +365,6 @@
             @openScheduleDialog="openScheduleDialogPrefilled"
           />
         </div>
-        <PubliftAd
-          :showAd="showAds"
-          fuseId="meet_vrec_rhs"
-          class="tw-hidden publift-l:tw-block"
-        >
-          <div
-            class="tw-h-[600px] publift-l:tw-w-[160px] publift-xl:tw-w-[300px]"
-          >
-            <div
-              id="meet_vrec_rhs"
-              data-fuse="meet_vrec_rhs"
-              class="tw-flex tw-items-center tw-justify-center"
-            ></div>
-          </div>
-        </PubliftAd>
       </div>
 
       <!-- Suggested topics -->
@@ -404,30 +379,11 @@
         :authorName="topicAuthorName"
       />
 
-      <PubliftAd
-        :showAd="showAds"
-        fuseId="meet_incontent_md"
-        class="tw-my-4 tw-hidden !tw-rounded-none sm:tw-block publift-l:tw-hidden"
-      >
-        <div class="tw-h-[300px] publift-m:tw-h-[90px]">
-          <div
-            id="meet_incontent_md"
-            data-fuse="meet_incontent_md"
-            class="tw-flex tw-items-center tw-justify-center"
-          ></div>
-        </div>
-      </PubliftAd>
-
-      <!-- <CarbonAd :ownerIsPremium="ownerIsPremium" /> -->
-
-      <div
-        :class="isPhone ? (showAds ? 'tw-h-[125px]' : 'tw-h-8') : 'tw-h-8'"
-      ></div>
+      <div class="tw-h-8"></div>
       <!-- Bottom bar for phones -->
       <div
         v-if="!isSettingSpecificTimes && isPhone && (!isSignUp || canEdit)"
         class="tw-fixed tw-bottom-0 tw-z-20 tw-flex tw-w-full tw-flex-col"
-        :style="showAds ? { bottom: '115px' } : {}"
       >
         <div
           class="tw-flex tw-h-[4rem] tw-w-full tw-items-center tw-px-4"
@@ -495,26 +451,6 @@
             </v-btn>
           </template>
         </div>
-        <PubliftAd
-          :showAd="showAds"
-          fuseId=""
-          class="tw-h-[115px] tw-w-full !tw-rounded-none !tw-p-0"
-        >
-          <div class="tw-h-[115px]"></div>
-        </PubliftAd>
-      </div>
-      <!-- Fixed bottom ad for desktop -->
-      <div
-        v-if="!isPhone && showAds"
-        class="tw-fixed tw-bottom-0 tw-left-0 tw-z-20 tw-w-full"
-      >
-        <PubliftAd
-          :showAd="showAds"
-          fuseId=""
-          class="tw-h-[115px] tw-w-full !tw-rounded-none !tw-p-0"
-        >
-          <div class="tw-h-[115px]"></div>
-        </PubliftAd>
       </div>
     </div>
   </span>
@@ -533,21 +469,8 @@ import {
   isIOS,
   isDstObserved,
   doesDstExist,
-  getDateDayOffset,
-  dateToDowDate,
-  getDateHoursOffset,
-  dateToTimeNum,
-  sendPluginError,
-  sendPluginSuccess,
-  isValidPluginMessage,
-  getCurrentTimezone,
-  convertToUTC,
-  isTimeWithinEventRange,
-  convertUTCSlotsToLocalISO,
-  validateDOWPayload,
-  timezoneObservesDST,
-  formatResponseDeadline,
   formatTimeUntil,
+  formatInTimezone,
 } from "@/utils"
 import { isBetween } from "@/utils/general_utils"
 import { validateEmail } from "@/utils"
@@ -579,8 +502,6 @@ import HelpDialog from "@/components/HelpDialog.vue"
 import EventDescription from "@/components/event/EventDescription.vue"
 import EventTopics from "@/components/event/EventTopics.vue"
 import ScheduleEventDialog from "@/components/event/ScheduleEventDialog.vue"
-import CarbonAd from "@/components/event/CarbonAd.vue"
-import PubliftAd from "@/components/event/PubliftAd.vue"
 export default {
   name: "Event",
 
@@ -605,8 +526,6 @@ export default {
     EventDescription,
     EventTopics,
     ScheduleEventDialog,
-    CarbonAd,
-    PubliftAd,
   },
 
   data: () => ({
@@ -633,6 +552,9 @@ export default {
     ownerPremiumChecked: false,
 
     curGuestId: "", // Id of the current guest being edited
+    // The timezone currently selected in the grid's "shown in" selector, surfaced from
+    // ScheduleOverlap so page-level displays (scheduled banner, deadline) follow it.
+    selectedTimezone: null,
     calendarPermissionGranted: true,
     addingAvailabilityAsGuest: false, // Whether a signed in user is current adding availability as a guest
 
@@ -665,21 +587,11 @@ export default {
     if (this.linkApple) {
       this.choiceDialog = true
     }
-    // window.enableStickyFooter = true
-    // this.initFusetag()
-    this.loadVideoAd()
   },
 
   computed: {
     ...mapState(["authUser", "events"]),
     ...mapGetters(["isPremiumUser"]),
-    showAds() {
-      return (
-        !this.ownerIsPremium &&
-        !this.isPremiumUser &&
-        !this.isSettingSpecificTimes
-      )
-    },
     allowScheduleEvent() {
       return this.scheduleOverlapComponent?.allowScheduleEvent
     },
@@ -789,9 +701,28 @@ export default {
         this.responseDeadline.getTime() <= this.nowTs
       )
     },
-    /** Human-readable local date + time for the deadline */
+    /** Canonical reference timezone for this event's scheduled/deadline displays:
+     *  the persisted event timezone, else the grid's active timezone, else the
+     *  browser zone (legacy events). Every viewer sees the same labeled time. */
+    /** Display timezone for scheduled time + deadline: follows the grid's "shown in"
+     *  selector when set, else the viewer's OWN local timezone. formatInTimezone only
+     *  adds a TZ label when this differs from the browser zone, so viewing in your own
+     *  zone stays label-free while picking another zone shows it explicitly. */
+    eventTimezone() {
+      return (
+        this.selectedTimezone?.value ||
+        Intl.DateTimeFormat().resolvedOptions().timeZone
+      )
+    },
+    /** Timezone the schedule dialog interprets inputs in: when opened from the
+     *  grid, match the grid's active timezone (so the dragged time lines up);
+     *  otherwise the viewer's local timezone. */
+    scheduleDialogTimezone() {
+      return this.schedulePrefill?.timezone || this.eventTimezone
+    },
+    /** Human-readable deadline in the viewer's local timezone (no label). */
     deadlineFormatted() {
-      return formatResponseDeadline(this.responseDeadline)
+      return formatInTimezone(this.responseDeadline, this.eventTimezone)
     },
     /** Live relative countdown to the deadline, e.g. "in 23 minutes" */
     deadlineRelative() {
@@ -801,11 +732,25 @@ export default {
     canRespond() {
       return !this.deadlinePassed
     },
-    /** Formatted local date + time of the persisted scheduled event, or "" */
+    /** Formatted date + time of the persisted scheduled event in the event
+     *  timezone, with an explicit TZ label, or "" */
     scheduledEventStartFormatted() {
       const start = this.event?.scheduledEvent?.startDate
       if (!start) return ""
-      return formatResponseDeadline(start)
+      // Label shows only when the rendered zone differs from the viewer's browser zone.
+      return formatInTimezone(start, this.eventTimezone)
+    },
+    /** Live relative time to the scheduled start, e.g. "in 23 minutes" / "happening now". */
+    scheduledRelative() {
+      const start = this.event?.scheduledEvent?.startDate
+      if (!start) return ""
+      const startMs = new Date(start).getTime()
+      if (isNaN(startMs)) return ""
+      const end = this.event?.scheduledEvent?.endDate
+      const endMs = end ? new Date(end).getTime() : startMs + 60 * 60 * 1000
+      if (this.nowTs >= startMs && this.nowTs < endMs) return "happening now"
+      if (this.nowTs >= endMs) return "ended"
+      return formatTimeUntil(start, this.nowTs)
     },
     /** The meeting link, only when it's a non-empty http(s) URL */
     meetingLinkUrl() {
@@ -818,36 +763,6 @@ export default {
   methods: {
     ...mapActions(["showError", "showInfo", "getEvents"]),
     ...mapMutations(["setAuthUser"]),
-
-    loadVideoAd() {
-      if (!this.isPhone && this.showAds && this.$refs.videoAdContainer) {
-        const script = document.createElement("script")
-        script.type = "text/javascript"
-        script.src =
-          "https://live.primis.tech/live/liveView.php?s=122130&schain=1.0,1!publift.com,01KF27H3XMWD7H1S0HYBGVB3BR,1"
-        this.$refs.videoAdContainer.appendChild(script)
-      }
-    },
-
-    initFusetag() {
-      console.log("initFusetag called, blockingFuseIds: ", [
-        "meet_vrec_lhs",
-        "meet_vrec_rhs",
-        "meet_incontent",
-        "meet_incontent_md",
-      ])
-      const fusetag = window.fusetag || (window.fusetag = { que: [] })
-      fusetag.que.push(function () {
-        fusetag.pageInit({
-          blockingFuseIds: [
-            "meet_vrec_lhs",
-            "meet_vrec_rhs",
-            "meet_incontent",
-            "meet_incontent_md",
-          ],
-        })
-      })
-    },
 
     /** Show choice dialog if not signed in, otherwise, immediately start editing availability */
     addAvailability() {
@@ -1398,612 +1313,6 @@ export default {
       this.saveChangesAsGuest(guestPayload)
     },
 
-    handleMessage(event) {
-      if (!isValidPluginMessage(event)) return
-
-      const payload = event.data.payload
-
-      if (payload?.type === "get-slots") {
-        this.getSlots(event)
-      }
-
-      if (payload?.type === "set-slots") {
-        this.setSlots(event)
-      }
-    },
-
-    // TEMPORARY: Intercept plugin responses for debugging
-    interceptPluginResponses(event) {
-      // Only intercept messages from our own window (plugin responses)
-      if (event.data?.type === "FILL_CALENDAR_EVENT_RESPONSE") {
-        const { command, requestId, ok, error, payload } = event.data
-
-        if (ok) {
-          // Flatten get-slots output so slots are easy to scan in the console
-          if (command === "get-slots" && payload?.slots) {
-            console.log(
-              `[PLUGIN RESPONSE - SUCCESS] ${command} | timeIncrement: ${
-                payload.timeIncrement
-              } | timezone: ${payload.timezone ?? "—"}`
-            )
-            Object.entries(payload.slots).forEach(([userId, u]) => {
-              const label =
-                [u.name, u.email].filter(Boolean).join(" ") || userId
-              console.log(`  ${label}:`, {
-                availability: u.availability,
-                ifNeeded: u.ifNeeded,
-              })
-            })
-          } else {
-            console.log(`[PLUGIN RESPONSE - SUCCESS] ${command}`, {
-              requestId,
-              payload,
-              timestamp: new Date().toISOString(),
-            })
-          }
-        } else {
-          console.error(`[PLUGIN RESPONSE - ERROR] ${command}`, {
-            requestId,
-            error: error?.message || error,
-            timestamp: new Date().toISOString(),
-          })
-        }
-      }
-    },
-
-    async setSlots(event) {
-      const requestId = event.data?.requestId
-      const command = "set-slots"
-      if (this.isGroup) {
-        sendPluginError(
-          requestId,
-          command,
-          "Group events are not supported yet"
-        )
-        return
-      }
-
-      // Validation: Check event exists
-      if (!this.event) {
-        sendPluginError(requestId, command, "Event not loaded yet")
-        return
-      }
-
-      // Validation: Check timeIncrement exists, default to 15 if not
-      const timeIncrement = this.event.timeIncrement ?? 15
-
-      // Security check: If blindAvailabilityEnabled is true and user is NOT the owner,
-      // reject any request with guestName parameter
-      const payloadGuestName = event.data?.payload?.guestName
-      const hasGuestName = payloadGuestName && payloadGuestName.length > 0
-
-      if (this.event.blindAvailabilityEnabled) {
-        // Check if user is owner: ownerId is only returned by backend if user is the owner
-        // So if ownerId exists and matches current user's ID, they are the owner
-        const isOwner =
-          this.event.ownerId && this.authUser?._id === this.event.ownerId
-        if (!isOwner && hasGuestName) {
-          sendPluginError(
-            requestId,
-            command,
-            "Non-owners cannot set guest availability when 'Hide responses from respondents' is enabled."
-          )
-          return
-        }
-      }
-
-      // Check if guestName is provided in payload - if so, force guest mode
-      const forceGuestMode = hasGuestName
-
-      // Determine if current user is guest or logged-in
-      // If guestName is provided in payload, always treat as guest (ignore login status)
-      const isGuest = forceGuestMode || !this.authUser
-
-      // For guests, handle guest name and email
-      let guestName = ""
-      let guestEmail = ""
-      if (isGuest) {
-        const guestNameKey = `${this.event._id}.guestName`
-
-        if (forceGuestMode) {
-          // guestName provided in payload - use it and store in localStorage
-          guestName = payloadGuestName
-          // Store with event._id only (canonical guestName storage key)
-          localStorage[guestNameKey] = guestName
-
-          // If event collects emails, require guestEmail in payload
-          if (this.event.collectEmails) {
-            guestEmail = event.data?.payload?.guestEmail || ""
-            if (!guestEmail || guestEmail.length === 0) {
-              sendPluginError(
-                requestId,
-                command,
-                "Guest email is required because this event collects emails. Please provide 'guestEmail' in the payload."
-              )
-              return
-            }
-
-            // Validate email format
-            if (!validateEmail(guestEmail)) {
-              sendPluginError(
-                requestId,
-                command,
-                `Invalid email format: ${guestEmail}`
-              )
-              return
-            }
-          } else {
-            // Email not required, but get from payload if provided, or from existing response
-            guestEmail =
-              event.data?.payload?.guestEmail ||
-              this.event.responses[guestName]?.email ||
-              ""
-          }
-        } else {
-          // No guestName in payload - use existing flow (check localStorage)
-          const storedGuestName = localStorage[guestNameKey]
-
-          // If no guest name in localStorage, require it from payload
-          if (!storedGuestName || storedGuestName.length === 0) {
-            sendPluginError(
-              requestId,
-              command,
-              "Guest name is required. Please provide 'guestName' in the payload or add your availability through the UI first."
-            )
-            return
-          }
-
-          // Use stored guest name
-          guestName = storedGuestName
-          // Get email from existing response or payload (if provided)
-          guestEmail =
-            event.data?.payload?.guestEmail ||
-            this.event.responses[guestName]?.email ||
-            ""
-        }
-      }
-
-      // Get slots from payload - new format: [{ start, end, status }]
-      let slots = event.data?.payload?.slots
-
-      if (!Array.isArray(slots)) {
-        sendPluginError(requestId, command, "Slots must be an array")
-        return
-      }
-
-      // Validate DOW payload if this is a DOW event (only if slots are provided)
-      // Check if timezone is provided - if so, skip same-day check since timezone conversion may cause day boundary crossing
-      const hasTimezone = !!event.data?.payload?.timezone
-      if (this.event.type === eventTypes.DOW && slots.length > 0) {
-        const validationResult = validateDOWPayload(slots, hasTimezone)
-        if (validationResult) {
-          sendPluginError(requestId, command, validationResult.error)
-          return
-        }
-      }
-
-      if (this.event.type === eventTypes.DOW && slots.length > 0) {
-        //need to offset for DOW cuz dow dates are in DST
-        slots = slots.map((slot) => {
-          const startDate = dayjs(slot.start)
-          const endDate = dayjs(slot.end)
-          return {
-            ...slot,
-            start: startDate.add(1, "hour").format("YYYY-MM-DDTHH:mm:ss"),
-            end: endDate.add(1, "hour").format("YYYY-MM-DDTHH:mm:ss"),
-          }
-        })
-      }
-
-      // Determine timezone for conversion
-      // Priority: 1. User-provided timezone in payload, 2. localStorage, 3. Browser's local timezone
-      let timezoneValue = null
-      if (event.data?.payload?.timezone) {
-        // User provided timezone in the message (should be IANA timezone name)
-        const providedTimezone = event.data.payload.timezone
-
-        // Validate that the provided timezone exists in allTimezones
-        if (!(providedTimezone in allTimezones)) {
-          sendPluginError(
-            requestId,
-            command,
-            `Invalid timezone: "${providedTimezone}". Please provide a valid IANA timezone name from the supported timezones list.`
-          )
-          return
-        }
-
-        timezoneValue = providedTimezone
-      } else {
-        // Use timezone from localStorage (should have IANA timezone name in .value)
-        try {
-          const timezoneObj = JSON.parse(localStorage["timezone"])
-          timezoneValue = timezoneObj.value
-        } catch (err) {
-          // If parsing fails, fall back to browser's local timezone
-          timezoneValue = Intl.DateTimeFormat().resolvedOptions().timeZone
-        }
-      }
-
-      // Generate all valid displayed time ranges using ScheduleOverlap's existing logic
-      // Returns a Map that maps time slot startTime.getTime() to { row, col, startTime, endTime }
-      const timeSlotToRowCol =
-        this.scheduleOverlapComponent &&
-        typeof this.scheduleOverlapComponent.getAllValidTimeRanges ===
-          "function"
-          ? this.scheduleOverlapComponent.getAllValidTimeRanges()
-          : new Map()
-
-      // Validate each slot has required fields
-      for (let i = 0; i < slots.length; i++) {
-        const slot = slots[i]
-        if (!slot.start || !slot.end) {
-          sendPluginError(
-            requestId,
-            command,
-            `Slot at index ${i} is missing required 'start' or 'end' field`
-          )
-          return
-        }
-        if (!slot.status) {
-          sendPluginError(
-            requestId,
-            command,
-            `Slot at index ${i} is missing required 'status' field`
-          )
-          return
-        }
-        if (slot.status !== "available" && slot.status !== "if-needed") {
-          sendPluginError(
-            requestId,
-            command,
-            `Invalid status '${slot.status}' at index ${i}. Must be 'available' or 'if-needed'`
-          )
-          return
-        }
-      }
-
-      // Validate that all start/end times fall within event's date range
-      const eventDates = this.event.dates.map((d) => new Date(d))
-      const eventStartTime = this.event.startTime // Hours (e.g., 9 for 9am)
-      const eventDuration = this.event.duration // Hours
-
-      // Convert all slot times from user's timezone to UTC and validate
-      const convertedSlots = []
-      for (let i = 0; i < slots.length; i++) {
-        const slot = slots[i]
-
-        // Convert timestamps from user's timezone to UTC
-        let startTime, endTime
-        try {
-          startTime = convertToUTC(slot.start, timezoneValue)
-          endTime = convertToUTC(slot.end, timezoneValue)
-        } catch (err) {
-          sendPluginError(
-            requestId,
-            command,
-            `Failed to parse time at index ${i}: ${err.message}`
-          )
-          return
-        }
-
-        if (isNaN(startTime.getTime())) {
-          sendPluginError(
-            requestId,
-            command,
-            `Invalid start time at index ${i}: ${slot.start}`
-          )
-          return
-        }
-
-        if (isNaN(endTime.getTime())) {
-          sendPluginError(
-            requestId,
-            command,
-            `Invalid end time at index ${i}: ${slot.end}`
-          )
-          return
-        }
-
-        if (endTime <= startTime) {
-          sendPluginError(
-            requestId,
-            command,
-            `End time must be after start time at index ${i}`
-          )
-          return
-        }
-      }
-
-      // Split slots into intervals based on timeIncrement
-      const allAvailabilityTimestamps = []
-      const allIfNeededTimestamps = []
-      // Track timestamps and their statuses to detect conflicts
-      const timestampStatusMap = new Map()
-
-      let isBrokenBounds = false
-      slots.forEach((slot, i) => {
-        const userStartDate = dayjs.tz(slot.start, timezoneValue)
-        const userEndDate = dayjs.tz(slot.end, timezoneValue)
-        const userStartMs = userStartDate.valueOf()
-        const userEndMs = userEndDate.valueOf()
-
-        // Calculate the width of the user's interval
-        const intWidth = userEndMs - userStartMs
-
-        // Calculate total covered width by summing all overlapping slot intersections
-        // Also generate timestamps in the same loop
-        let coveredWidth = 0
-
-        timeSlotToRowCol.forEach((value, key) => {
-          const slotStartMs = value.startTime.valueOf()
-          const slotEndMs = value.endTime.valueOf()
-
-          // Check for overlap: userStart <= slotEnd && userEnd >= slotStart
-          if (userStartMs <= slotEndMs && userEndMs >= slotStartMs) {
-            // Calculate intersection of user interval and slot
-            const intersectionStartMs = Math.max(userStartMs, slotStartMs)
-            const intersectionEndMs = Math.min(userEndMs, slotEndMs)
-
-            // Add this intersection's width to the total for bounds checking
-            coveredWidth += intersectionEndMs - intersectionStartMs
-
-            // Generate timestamps at timeIncrement intervals
-            const incrementMs = timeIncrement * 60 * 1000
-            let currentTimeMs = intersectionStartMs
-
-            // Generate timestamps for the intersection
-            // Use <= to include boundary timestamps when intersection is exactly at slot boundaries
-            while (currentTimeMs < intersectionEndMs) {
-              const timestamp = new Date(currentTimeMs)
-              const timestampKey = timestamp.getTime()
-
-              // Check for status conflicts
-              if (timestampStatusMap.has(timestampKey)) {
-                const existingStatus = timestampStatusMap.get(timestampKey)
-                if (existingStatus !== slot.status) {
-                  sendPluginError(
-                    requestId,
-                    command,
-                    `Time slot at index ${i} overlaps with another time slot with different status`
-                  )
-                  return
-                }
-              } else {
-                timestampStatusMap.set(timestampKey, slot.status)
-              }
-
-              // Add Date object (not milliseconds) to appropriate array
-              if (slot.status === "available") {
-                allAvailabilityTimestamps.push(timestamp)
-              } else {
-                allIfNeededTimestamps.push(timestamp)
-              }
-
-              currentTimeMs += incrementMs
-
-              // Stop if we've exceeded the intersection end
-              if (currentTimeMs > intersectionEndMs) {
-                break
-              }
-            }
-          }
-        })
-
-        if (coveredWidth < intWidth) {
-          sendPluginError(
-            requestId,
-            command,
-            `Time slot at index ${i} (${slot.start} to ${slot.end}) falls outside the event's date/time range.`
-          )
-          isBrokenBounds = true
-        }
-      })
-
-      if (isBrokenBounds) return
-
-      // Send new slots (overwrites existing availability)
-      try {
-        const sanitizedId = this.eventId.replaceAll(".", "")
-        const payload = {
-          availability: allAvailabilityTimestamps,
-          ifNeeded: allIfNeededTimestamps,
-        }
-
-        // Set guest flag and user identification
-        if (isGuest) {
-          // For guests: include name and email (already validated and stored above)
-          payload.guest = true
-          payload.name = guestName
-          payload.email = guestEmail
-        } else {
-          // For logged-in users: backend will use session to identify user
-          payload.guest = false
-        }
-
-        await post(`/events/${sanitizedId}/response`, payload)
-
-        // Trigger frontend refresh to update UI
-        await this.refreshEvent()
-
-        sendPluginSuccess(requestId, command)
-      } catch (err) {
-        sendPluginError(
-          requestId,
-          command,
-          `Failed to set slots: ${err.message || "Unknown error"}`
-        )
-      }
-    },
-
-    async getSlots(event) {
-      const requestId = event.data?.requestId
-      const command = "get-slots"
-
-      // Need the event to calculate timeMin and timeMax
-      if (!this.event) {
-        sendPluginError(requestId, command, "Event not loaded yet")
-        return
-      }
-
-      // Resolve timezone: same logic as set-slots (payload → localStorage → browser)
-      let timezoneValue = null
-      if (event.data?.payload?.timezone) {
-        const providedTimezone = event.data.payload.timezone
-        if (!(providedTimezone in allTimezones)) {
-          sendPluginError(
-            requestId,
-            command,
-            `Invalid timezone: "${providedTimezone}". Please provide a valid IANA timezone name from the supported timezones list.`
-          )
-          return
-        }
-        timezoneValue = providedTimezone
-      } else {
-        try {
-          const timezoneObj = JSON.parse(localStorage["timezone"])
-          timezoneValue = timezoneObj.value
-        } catch (err) {
-          timezoneValue = Intl.DateTimeFormat().resolvedOptions().timeZone
-        }
-      }
-
-      let sanitizedId = this.eventId.replaceAll(".", "")
-
-      // Calculate timeMin and timeMax using the same logic as fetchResponses in ScheduleOverlap
-      let timeMin, timeMax
-      if (this.event.type === eventTypes.GROUP) {
-        if (this.event.dates.length > 0) {
-          // Fetch the date range for the current week
-          timeMin = new Date(this.event.dates[0])
-          timeMax = new Date(this.event.dates[this.event.dates.length - 1])
-          timeMax.setDate(timeMax.getDate() + 1)
-
-          // Convert dow dates to discrete dates
-          timeMin = dateToDowDate(
-            this.event.dates,
-            timeMin,
-            this.weekOffset,
-            true
-          )
-          timeMax = dateToDowDate(
-            this.event.dates,
-            timeMax,
-            this.weekOffset,
-            true
-          )
-        }
-      } else {
-        // For non-GROUP events, use the event dates directly
-        if (this.event.dates.length > 0) {
-          // Fetch the entire time range of availabilities
-          timeMin = new Date(this.event.dates[0])
-          timeMax = new Date(this.event.dates[this.event.dates.length - 1])
-          timeMax.setDate(timeMax.getDate() + 1)
-        }
-      }
-
-      if (!timeMin || !timeMax) {
-        sendPluginError(
-          requestId,
-          command,
-          "Could not calculate timeMin and timeMax"
-        )
-        return
-      }
-
-      try {
-        // Fetch responses between timeMin and timeMax
-
-        // Try to get guest name from localStorage using long event id only.
-        let guestName = null
-        if (typeof localStorage !== "undefined" && this.event?._id) {
-          const guestNameKey = `${this.event._id}.guestName`
-          guestName = localStorage[guestNameKey]
-        }
-
-        // Build URL with guestName if available
-        let url = `/events/${sanitizedId}/responses?timeMin=${timeMin.toISOString()}&timeMax=${timeMax.toISOString()}`
-        if (guestName && guestName.length > 0) {
-          url += `&guestName=${encodeURIComponent(guestName)}`
-        }
-
-        const responses = await get(url)
-
-        // Build response object with all users' slots
-        const allSlots = {}
-
-        for (const userId in responses) {
-          const response = responses[userId]
-
-          // Get name and email
-          let name = ""
-          let email = ""
-
-          // For guests, name and email are in the response directly
-          if (response.name && response.name.length > 0) {
-            name = response.name
-            email = response.email || ""
-          } else {
-            // For logged-in users, get from this.event.responses (populated by getEvent endpoint)
-            const eventResponse = this.event.responses?.[userId]
-            if (eventResponse?.user) {
-              const user = eventResponse.user
-              name = `${user.firstName || ""} ${user.lastName || ""}`.trim()
-              email = user.email || ""
-            } else {
-              // Fallback: use userId if user info not available
-              name = userId
-              email = ""
-            }
-          }
-
-          // Convert UTC to requested timezone. For DOW events, if timezone observes DST, subtract 1 hour
-          // (hardcoded DOW dates are in DST, so conversion in DST timezones is 1 hour ahead)
-          let availability = convertUTCSlotsToLocalISO(
-            response.availability,
-            timezoneValue
-          )
-          let ifNeeded = convertUTCSlotsToLocalISO(
-            response.ifNeeded,
-            timezoneValue
-          )
-          if (
-            this.event.type === eventTypes.DOW &&
-            timezoneObservesDST(timezoneValue)
-          ) {
-            const subtractOneHour = (s) =>
-              dayjs
-                .tz(s, timezoneValue)
-                .subtract(1, "hour")
-                .format("YYYY-MM-DDTHH:mm:ss")
-            availability = availability.map(subtractOneHour)
-            ifNeeded = ifNeeded.map(subtractOneHour)
-          }
-
-          allSlots[userId] = {
-            name,
-            email,
-            availability,
-            ifNeeded,
-          }
-        }
-
-        // Get time increment (default to 15 if not set)
-        const timeIncrement = this.event.timeIncrement ?? 15
-
-        sendPluginSuccess(requestId, command, {
-          slots: allSlots,
-          timeIncrement,
-          timezone: timezoneValue,
-        })
-      } catch (err) {
-        sendPluginError(
-          requestId,
-          command,
-          `Failed to fetch responses: ${err.message || "Unknown error"}`
-        )
-      }
-    },
 
     // -----------------------------------
     //#region Sign Up Form
@@ -2042,9 +1351,6 @@ export default {
 
   async created() {
     window.addEventListener("beforeunload", this.onBeforeUnload)
-    window.addEventListener("message", this.handleMessage)
-    // for dev:
-    // window.addEventListener("message", this.interceptPluginResponses)
 
     // Get event details
     try {
@@ -2115,9 +1421,6 @@ export default {
   beforeDestroy() {
     if (this.deadlineTimer) clearInterval(this.deadlineTimer)
     window.removeEventListener("beforeunload", this.onBeforeUnload)
-    window.removeEventListener("message", this.handleMessage)
-    // for dev:
-    // window.removeEventListener("message", this.interceptPluginResponses)
   },
 
   watch: {
@@ -2128,12 +1431,6 @@ export default {
           this.scheduleOverlapComponent = this.$refs.scheduleOverlap
         })
         document.title = `${this.event.name} - WannPassts`
-      }
-    },
-    ownerPremiumChecked(val) {
-      if (this.showAds) {
-        window.enableStickyFooter = true
-        this.initFusetag()
       }
     },
     scheduleOverlapComponent() {

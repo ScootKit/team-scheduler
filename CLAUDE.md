@@ -9,7 +9,6 @@ Monorepo for Timeful (formerly Schej.it), a group availability/scheduling app.
 - `frontend/` — Vue 2 + Vuetify + Tailwind single-page app (Vue CLI). Built output lands in `frontend/dist`.
 - `server/` — Go (Gin) HTTP API backed by MongoDB. Also serves the built frontend as static files at the root.
 - `compose.yaml` — Docker Compose: `mongo` + `frontend` (build-only, writes dist to a shared volume) + `server` (binds `127.0.0.1:3002`, mounts the dist volume read-only). See `DEPLOYMENT.md`.
-- `PLUGIN_API_README.md` — `window.postMessage` API used by browser plugins to read/write availability on the frontend.
 
 Internal identifiers (Go module `schej.it/server`, Mongo DB `schej-it`, prod email "Schej.it") still use the old name — leave them alone unless rebranding is the explicit task.
 
@@ -54,7 +53,7 @@ For local frontend → local backend, set `CORS_ORIGINS=http://localhost:8080` i
 - `src/router/index.js` — routes (`Landing`, `Home`, `Event`, `Group`, `Friends`, `Settings`, `SignIn`/`SignUp`/`Auth`, `StripeRedirect`, etc. — see `src/views/`).
 - `src/store/index.js` — single Vuex store (auth user, events, snackbar, dialogs).
 - `src/components/` — organized by feature folder (`event/`, `groups/`, `home/`, `landing/`, `pricing/`, `settings/`, `schedule_overlap/`, `calendar_permission_dialogs/`, `sign_up_form/`, `general/`) plus top-level shared components.
-- `src/utils/` — date math (`date_utils.js`, uses `dayjs`/`moment`/`spacetime`), `fetch_utils.js` (API client), `plugin_utils.js` (handles the postMessage plugin API — see `PLUGIN_API_README.md`), `sign_in_utils.js`, `location_utils.js`, `services/` (calendar-provider abstractions on the client side).
+- `src/utils/` — date math (`date_utils.js`, uses `dayjs`/`moment`/`spacetime`), `fetch_utils.js` (API client), `sign_in_utils.js`, `location_utils.js`, `services/` (calendar-provider abstractions on the client side).
 - Tailwind + Vuetify coexist; `tailwind.config.js` purges `src/**/*.{vue,js,...}`.
 - Service worker is registered via `register-service-worker`; `kill-sw.js` at the repo root is a kill switch script if needed.
 
@@ -62,9 +61,6 @@ For local frontend → local backend, set `CORS_ORIGINS=http://localhost:8080` i
 - Same-origin in production: Caddy → Go on `:3002`, Go serves `/api/*` and falls through to `index.html` for SPA routes.
 - Local dev: Vue CLI serves `:8080`, frontend calls `http://localhost:3002/api/*` (must whitelist via `CORS_ORIGINS`). Session cookie is `session` (cookie store, signed with `SESSION_SECRET`).
 - Event IDs may be either the Mongo `_id` or a short ID; `db.GetEventByEitherId` handles both — prefer it when looking up events from route params.
-
-### Plugin (browser extension) API
-The frontend exposes `get-slots` / `set-slots` over `window.postMessage` with a `FILL_CALENDAR_EVENT` type and `requestId` for response matching. Implementation lives in `src/utils/plugin_utils.js`; spec in `PLUGIN_API_README.md`. Don't change message shapes without also updating that doc.
 
 ## Conventions worth knowing
 

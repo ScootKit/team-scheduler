@@ -27,7 +27,7 @@
           v-model="newName"
           dense
           hide-details
-          autofocus
+          :autofocus="$autofocusEnabled"
           @keyup.enter="saveName"
         ></v-text-field>
         <v-btn icon small @click="cancelEditName">

@@ -79,6 +79,11 @@ type Event struct {
 	// Whether to start the event on Monday (as opposed to Sunday, used for DOW events)
 	StartOnMonday *bool `json:"startOnMonday" bson:"startOnMonday,omitempty"`
 
+	// Timezone is the IANA timezone the event was created in (e.g. "Europe/Berlin"). It is the
+	// canonical reference frame for displaying/interpreting the response deadline and scheduled time
+	// so every viewer sees the same wall-clock regardless of their browser timezone.
+	Timezone string `json:"timezone" bson:"timezone,omitempty"`
+
 	// Whether to enable blind availability
 	BlindAvailabilityEnabled *bool `json:"blindAvailabilityEnabled" bson:"blindAvailabilityEnabled,omitempty"`
 
@@ -103,6 +108,10 @@ type Event struct {
 	// MeetingLink is an optional video-call link (e.g. Google Meet) the creator attaches when they
 	// set the final scheduled time for the event.
 	MeetingLink string `json:"meetingLink" bson:"meetingLink,omitempty"`
+
+	// StartNotifiedFor is the scheduledEvent.startDate value for which the "starting now" webhook
+	// has already been sent. Lets the poller fire once per scheduled time (and again if rescheduled).
+	StartNotifiedFor *primitive.DateTime `json:"-" bson:"startNotifiedFor,omitempty"`
 
 	// Remindees
 	Remindees *[]Remindee `json:"remindees" bson:"remindees,omitempty"`

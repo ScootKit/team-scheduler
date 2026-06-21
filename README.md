@@ -65,12 +65,20 @@ It has diverged substantially from upstream. Notable changes:
   Meet link; shown as a banner + highlighted in the grid. Integrates with the
   existing "schedule event" flow (opens the dialog prefilled).
 - **24-hour time** and **European day-first dates** (`22.6`) by default.
+- **Discord Webhook Notifications** — Automatically send notifications to a Discord
+  channel when an event is scheduled, starts or when a new event gets created.
+- **Public folders** — Public folders are visible to everyone who has an account in this instance
+  as read-only.
+- **Improved Timezone Scheduling** — Events have now a fixed timezone which all times are calculated against and we've
+  improved the way which cross-content scheduling can be done and how that is displayed. Additionally, we store the
+  timezone offset of users in their availability to improve support for frequent travelers.
 
 **Security hardening**
 
 - Ported upstream's pending security PRs (session-cookie hardening, ICS SSRF
   protection, OTP send rate-limiting, analytics Basic-Auth fail-closed,
   calendar-parser & event-route hardening).
+- Restricted the Plugin API.
 - Additional: Google `email_verified` enforced, `check-email` enumeration fixed,
   OTP delivered via SES, `editEvent` requires auth, per-event topic flood cap, ICS feed size cap, meeting links
   restricted to `http(s)`. Bumped `gin-contrib/cors` to 1.6.0.

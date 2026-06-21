@@ -47,7 +47,7 @@
           v-model="newDescription"
           placeholder="Enter a description..."
           class="tw-flex-grow tw-p-2 tw-text-xs sm:tw-text-sm"
-          autofocus
+          :autofocus="$autofocusEnabled"
           :rows="1"
           auto-grow
           hide-details

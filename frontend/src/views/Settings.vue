@@ -144,7 +144,7 @@
                 </div>
                 <v-text-field
                   v-model="deleteValidateEmail"
-                  autofocus
+                  :autofocus="$autofocusEnabled"
                   class="tw-flex-initial tw-text-white"
                   :placeholder="authUser.email"
                 />

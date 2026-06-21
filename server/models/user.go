@@ -35,6 +35,10 @@ type User struct {
 	StripeCustomerId *string `json:"stripeCustomerId" bson:"stripeCustomerId,omitempty"`
 	IsPremium        *bool   `json:"isPremium" bson:"isPremium,omitempty"`
 	NumEventsCreated int     `json:"numEventsCreated" bson:"numEventsCreated,omitempty"`
+
+	// IsAdmin is computed (not stored) from the user's email domain — true for ADMIN_EMAIL_DOMAINS.
+	// Used by the client to show admin-only UI (e.g. the public-folder toggle).
+	IsAdmin bool `json:"isAdmin" bson:"-"`
 }
 
 // Declare the possible types of TokenOrigin

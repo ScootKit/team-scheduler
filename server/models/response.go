@@ -37,6 +37,12 @@ type Response struct {
 	UserId primitive.ObjectID `json:"userId" bson:"userId,omitempty"`
 	User   *User              `json:"user" bson:",omitempty"`
 
+	// TimezoneOffset is the respondent's JS getTimezoneOffset() (minutes behind UTC, positive =
+	// behind) captured AT SUBMISSION TIME. Stored per-response because users travel — the value on
+	// the User document reflects only their last sign-in. Nil for responses submitted before this
+	// was captured. Surfaced onto response.User.TimezoneOffset when responses are returned.
+	TimezoneOffset *int `json:"timezoneOffset" bson:"timezoneOffset,omitempty"`
+
 	// Availability
 	Availability []primitive.DateTime `json:"availability" bson:"availability"`
 	IfNeeded     []primitive.DateTime `json:"ifNeeded" bson:"ifNeeded"`

@@ -23,14 +23,29 @@
           </div>
         </div>
       </div>
-      <v-btn
-        text
-        @click="openCreateFolderDialog"
-        class="tw-text-very-dark-gray"
-      >
-        <v-icon class="tw-text-lg">mdi-folder-plus</v-icon>
-        <span class="tw-ml-2">New folder</span>
-      </v-btn>
+      <div class="tw-flex tw-items-center tw-gap-1">
+        <v-btn
+          text
+          small
+          @click="hidePastEvents = !hidePastEvents"
+          class="tw-text-very-dark-gray"
+        >
+          <v-icon class="tw-text-lg">{{
+            hidePastEvents ? "mdi-eye-off-outline" : "mdi-eye-outline"
+          }}</v-icon>
+          <span class="tw-ml-2">{{
+            hidePastEvents ? "Show past" : "Hide past"
+          }}</span>
+        </v-btn>
+        <v-btn
+          text
+          @click="openCreateFolderDialog"
+          class="tw-text-very-dark-gray"
+        >
+          <v-icon class="tw-text-lg">mdi-folder-plus</v-icon>
+          <span class="tw-ml-2">New folder</span>
+        </v-btn>
+      </div>
     </div>
 
     <div>
@@ -49,16 +64,26 @@
             v-if="folder.type === 'regular'"
             :color="folder.color || '#D3D3D3'"
             small
-            class="tw-mr-2 tw-cursor-pointer tw-rounded tw-border tw-border-light-gray-stroke tw-px-2 tw-text-sm tw-font-medium"
-            @click="openEditFolderDialog(folder)"
+            class="tw-mr-2 tw-rounded tw-border tw-border-light-gray-stroke tw-px-2 tw-text-sm tw-font-medium"
+            :class="folder.isOwn ? 'tw-cursor-pointer' : ''"
+            @click="folder.isOwn && openEditFolderDialog(folder)"
           >
             {{ folder.name }}
           </v-chip>
           <span v-else class="tw-mr-2 tw-text-sm tw-font-medium">{{
             folder.name
           }}</span>
+          <v-chip
+            v-if="folder.type === 'regular' && folder.isPublic"
+            x-small
+            class="tw-mr-2 tw-bg-light-gray tw-text-dark-gray"
+            title="This folder is public and visible to everyone"
+          >
+            <v-icon x-small left>mdi-earth</v-icon>
+            Public
+          </v-chip>
           <div
-            v-if="folder.type === 'regular'"
+            v-if="folder.type === 'regular' && folder.isOwn"
             class="tw-invisible tw-flex tw-items-center group-hover:tw-visible"
           >
             <v-menu offset-y>
@@ -93,7 +118,12 @@
               ...eventsByFolder[folder.id].groups,
               ...eventsByFolder[folder.id].events,
             ]"
-            group="events"
+            :group="
+              folder.type === 'regular' && !folder.isOwn
+                ? { name: 'events', pull: false, put: false }
+                : 'events'
+            "
+            :disabled="folder.type === 'regular' && !folder.isOwn"
             @end="onEnd"
             :data-folder-id="
               folder.type === 'no-folder'
@@ -173,7 +203,7 @@
             v-model="newFolderName"
             label="Folder name"
             placeholder="Untitled folder"
-            autofocus
+            :autofocus="$autofocusEnabled"
             @keydown.enter="confirmFolderDialog"
             hide-details
           ></v-text-field>
@@ -192,6 +222,27 @@
                 @click="newFolderColor = color"
               ></div>
             </div>
+          </div>
+          <div class="tw-mt-5">
+            <v-text-field
+              v-model="newFolderWebhookUrl"
+              label="Discord webhook URL (optional)"
+              placeholder="https://discord.com/api/webhooks/..."
+              hide-details="auto"
+              clearable
+            ></v-text-field>
+            <div class="tw-mt-1 tw-text-xs tw-text-dark-gray">
+              Posts to this Discord channel when an event is added to this folder
+              or scheduled.
+            </div>
+          </div>
+          <div v-if="authUser && authUser.isAdmin" class="tw-mt-4">
+            <v-switch
+              v-model="newFolderIsPublic"
+              label="Make this folder public (visible to everyone)"
+              hide-details
+              class="tw-mt-0"
+            ></v-switch>
           </div>
         </v-card-text>
         <v-card-actions>
@@ -228,9 +279,12 @@ export default {
     return {
       deleteDialog: false,
       folderToDelete: {},
+      hidePastEvents: localStorage["hidePastEvents"] === "true",
       createFolderDialog: false,
       newFolderName: "",
       newFolderColor: folderColors[3],
+      newFolderWebhookUrl: "",
+      newFolderIsPublic: false,
       isEditingFolder: false,
       folderToEdit: null,
       folderOpenState: {
@@ -273,6 +327,12 @@ export default {
         for (const eventId of folder.eventIds) {
           const event = this.allEventsMap[eventId]
           if (event) {
+            // When hiding past events, skip them (but still claim the id so it
+            // doesn't fall through to the no-folder bucket).
+            if (this.hidePastEvents && this.isEventPast(event)) {
+              allEventIds.delete(eventId)
+              continue
+            }
             if (event.isArchived) {
               if (event.type === eventTypes.GROUP) {
                 eventsByFolder["archived"].groups.push(event)
@@ -296,6 +356,9 @@ export default {
       for (const eventId of allEventIds) {
         const event = this.allEventsMap[eventId]
         if (event) {
+          if (this.hidePastEvents && this.isEventPast(event)) {
+            continue
+          }
           if (event.isArchived) {
             if (event.type === eventTypes.GROUP) {
               eventsByFolder["archived"].groups.push(event)
@@ -330,6 +393,9 @@ export default {
         id: folder._id,
         type: "regular",
         name: folder.name,
+        userId: folder.userId,
+        isPublic: folder.isPublic,
+        isOwn: this.isOwnFolder(folder),
         emptyMessage: "No events in this folder",
       }))
 
@@ -366,7 +432,40 @@ export default {
       "updateFolder",
       "createNew",
     ]),
+    isOwnFolder(folder) {
+      // A regular folder is owned by the current user when its userId matches.
+      // Special folders (no-folder/archived) have no userId and are always "own".
+      if (!folder || folder.userId === undefined || folder.userId === null) {
+        return true
+      }
+      return folder.userId === this.authUser?._id
+    },
+    /** Whether an event is in the past (scheduled time elapsed, or all candidate dates passed).
+     *  Weekly/day-of-week and group events have no concrete date, so are never past. */
+    isEventPast(event) {
+      if (!event || event.type === eventTypes.GROUP || event.type === eventTypes.DOW) {
+        return false
+      }
+      const scheduledStart = event.scheduledEvent?.startDate
+      if (scheduledStart) {
+        const d = new Date(scheduledStart)
+        if (!isNaN(d.getTime())) return d.getTime() < Date.now()
+      }
+      const dates = event.dates
+      if (Array.isArray(dates) && dates.length > 0) {
+        const latest = Math.max(...dates.map((x) => new Date(x).getTime()))
+        if (!isNaN(latest)) {
+          // Treat as past once the day after the latest candidate date has begun.
+          return latest + 24 * 60 * 60 * 1000 < Date.now()
+        }
+      }
+      return false
+    },
     sortEvents(a, b) {
+      // Past events sort after upcoming ones.
+      const pastA = this.isEventPast(a)
+      const pastB = this.isEventPast(b)
+      if (pastA !== pastB) return pastA ? 1 : -1
       if (ObjectID.isValid(a._id) && ObjectID.isValid(b._id)) {
         return ObjectID(b._id).getTimestamp() - ObjectID(a._id).getTimestamp()
       }
@@ -412,28 +511,37 @@ export default {
         })
       }
     },
-    confirmFolderDialog() {
+    async confirmFolderDialog() {
       if (!this.newFolderName.trim()) {
         this.closeFolderDialog()
         return
       }
+      // Send null to clear the webhook; trimmed string otherwise.
+      const webhookUrl = (this.newFolderWebhookUrl || "").trim() || null
+      let ok = false
       if (this.isEditingFolder) {
-        this.updateFolder({
+        ok = await this.updateFolder({
           folderId: this.folderToEdit._id,
           name: this.newFolderName.trim(),
           color: this.newFolderColor,
+          webhookUrl,
+          isPublic: this.newFolderIsPublic,
         })
       } else {
         this.$posthog.capture("folder_created", {
           folderName: this.newFolderName.trim(),
           folderColor: this.newFolderColor,
         })
-        this.createFolder({
+        ok = await this.createFolder({
           name: this.newFolderName.trim(),
           color: this.newFolderColor,
+          webhookUrl,
+          isPublic: this.newFolderIsPublic,
         })
       }
-      this.closeFolderDialog()
+      // Keep the dialog open on failure (e.g. invalid Discord webhook URL) so the
+      // user can fix the value; the store surfaces the error message.
+      if (ok) this.closeFolderDialog()
     },
     closeFolderDialog() {
       this.createFolderDialog = false
@@ -441,19 +549,30 @@ export default {
       this.folderToEdit = null
       this.newFolderName = ""
       this.newFolderColor = folderColors[3]
+      this.newFolderWebhookUrl = ""
+      this.newFolderIsPublic = false
     },
     openCreateFolderDialog() {
       this.isEditingFolder = false
       this.folderToEdit = null
       this.newFolderName = ""
       this.newFolderColor = folderColors[3]
+      this.newFolderWebhookUrl = ""
+      this.newFolderIsPublic = false
       this.createFolderDialog = true
     },
     openEditFolderDialog(folder) {
+      // Don't allow editing folders the current user doesn't own (public folders
+      // shared by others are read-only).
+      if (!this.isOwnFolder(folder)) {
+        return
+      }
       this.isEditingFolder = true
       this.folderToEdit = folder
       this.newFolderName = folder.name
       this.newFolderColor = folder.color || folderColors[3]
+      this.newFolderWebhookUrl = folder.webhookUrl || ""
+      this.newFolderIsPublic = !!folder.isPublic
       this.createFolderDialog = true
     },
     toggleFolder(folderId) {
@@ -493,6 +612,9 @@ export default {
     }
   },
   watch: {
+    hidePastEvents(val) {
+      localStorage["hidePastEvents"] = val ? "true" : "false"
+    },
     folderOpenState: {
       handler(newState) {
         try {

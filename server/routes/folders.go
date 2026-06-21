@@ -12,6 +12,7 @@ import (
 	"schej.it/server/middleware"
 	"schej.it/server/models"
 	"schej.it/server/services/discordwebhook"
+	"schej.it/server/utils"
 )
 
 func InitFolders(router *gin.RouterGroup) {
@@ -78,18 +79,26 @@ func GetFolder(c *gin.Context) {
 		return
 	}
 
-	folder, err := db.GetFolderById(folderId, userId)
+	// Allow reading own folders or any public folder.
+	folder, err := db.GetReadableFolderById(folderId, userId)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Folder not found"})
 		return
 	}
 
-	events, err := db.GetEventsInFolder(folderId, userId)
+	// Events are mapped per owner; fetch using the folder owner so public folders resolve for
+	// non-owner viewers too.
+	events, err := db.GetEventsInFolder(folderId, folder.UserId)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get events in folder"})
 		return
 	}
 	folder.EventIds = events
+
+	// Never expose another user's Discord webhook URL (it embeds a secret token).
+	if folder.UserId != userId {
+		folder.WebhookUrl = nil
+	}
 
 	c.JSON(http.StatusOK, folder)
 }
@@ -112,6 +121,7 @@ func CreateFolder(c *gin.Context) {
 		Name       string  `json:"name" binding:"required"`
 		Color      *string `json:"color"`
 		WebhookUrl *string `json:"webhookUrl"`
+		IsPublic   *bool   `json:"isPublic"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -134,11 +144,23 @@ func CreateFolder(c *gin.Context) {
 		return
 	}
 
+	// Only admin-domain users may create public folders.
+	var isPublic *bool
+	if utils.Coalesce(body.IsPublic) {
+		user := db.GetUserById(userIdString)
+		if user == nil || !utils.IsAdminEmailDomain(user.Email) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Only admins can create public folders"})
+			return
+		}
+		isPublic = utils.TruePtr()
+	}
+
 	folder := models.Folder{
 		UserId:     userId,
 		Name:       body.Name,
 		Color:      body.Color,
 		WebhookUrl: webhookUrl,
+		IsPublic:   isPublic,
 	}
 
 	id, err := db.CreateFolder(&folder)
@@ -170,6 +192,7 @@ func UpdateFolder(c *gin.Context) {
 		Name       *string `json:"name"`
 		Color      *string `json:"color"`
 		WebhookUrl *string `json:"webhookUrl"`
+		IsPublic   *bool   `json:"isPublic"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -191,6 +214,17 @@ func UpdateFolder(c *gin.Context) {
 	}
 	if body.Color != nil {
 		updates["color"] = body.Color
+	}
+	if body.IsPublic != nil {
+		// Making a folder public requires an admin-domain user; un-publishing is always allowed.
+		if *body.IsPublic {
+			user := db.GetUserById(userIdString)
+			if user == nil || !utils.IsAdminEmailDomain(user.Email) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Only admins can create public folders"})
+				return
+			}
+		}
+		updates["isPublic"] = *body.IsPublic
 	}
 	if body.WebhookUrl != nil {
 		webhookUrl := normalizeWebhookUrl(body.WebhookUrl)

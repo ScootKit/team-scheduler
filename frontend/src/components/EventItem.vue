@@ -8,6 +8,7 @@
     <v-container
       v-ripple
       class="tw-flex tw-min-h-16 tw-items-center tw-justify-between tw-rounded-lg tw-bg-white tw-px-4 tw-py-2.5 tw-text-black tw-drop-shadow tw-transition-all hover:tw-drop-shadow-md sm:tw-py-3"
+      :class="{ 'tw-opacity-60': isPast }"
       :data-ph-capture-attribute-event-id="event._id"
       :data-ph-capture-attribute-event-name="event.name"
     >
@@ -30,9 +31,25 @@
           }}</v-icon>
         </div>
         <div class="tw-ml-3">
-          <div>{{ this.event.name }}</div>
+          <div class="tw-flex tw-items-center tw-gap-2">
+            <span>{{ this.event.name }}</span>
+            <v-chip
+              v-if="isPast"
+              x-small
+              class="tw-bg-light-gray tw-text-dark-gray"
+            >
+              Past
+            </v-chip>
+          </div>
           <div class="tw-text-sm tw-font-light tw-text-very-dark-gray">
             {{ dateString }}
+          </div>
+          <div
+            v-if="scheduledTimeString"
+            class="tw-mt-0.5 tw-flex tw-items-center tw-gap-1 tw-text-sm tw-font-medium tw-text-green"
+          >
+            <v-icon x-small color="green">mdi-calendar-check</v-icon>
+            {{ scheduledTimeString }}
           </div>
         </div>
       </div>
@@ -207,7 +224,13 @@
 </template>
 
 <script>
-import { getDateRangeStringForEvent, _delete, isPhone, post } from "@/utils"
+import {
+  getDateRangeStringForEvent,
+  formatInTimezone,
+  _delete,
+  isPhone,
+  post,
+} from "@/utils"
 import { mapActions, mapState } from "vuex"
 import { eventTypes } from "@/constants"
 
@@ -269,6 +292,49 @@ export default {
     },
     userHasResponded() {
       return this.event.hasResponded ?? false
+    },
+    /** Formatted scheduled date + time when the event has a locked-in time, else
+     *  "". Rendered in the event's timezone (fallback browser zone) with an
+     *  explicit short TZ label so it reads the same for every viewer. */
+    scheduledTimeString() {
+      const start = this.event.scheduledEvent?.startDate
+      if (!start) return ""
+      // Show in the viewer's own local timezone (no foreign label).
+      const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone
+      return formatInTimezone(start, tzName, { year: undefined })
+    },
+    isPast() {
+      // Weekly/day-of-week and group events have no concrete future date, so
+      // they're never considered "past".
+      if (this.isGroup || this.isDow) {
+        return false
+      }
+
+      // Prefer the scheduled event's start date if the event has been scheduled.
+      const scheduledStart = this.event.scheduledEvent?.startDate
+      if (scheduledStart) {
+        const d = new Date(scheduledStart)
+        if (!isNaN(d.getTime())) {
+          return d.getTime() < Date.now()
+        }
+      }
+
+      // Otherwise fall back to the latest of the event's candidate dates.
+      const dates = this.event.dates
+      if (Array.isArray(dates) && dates.length > 0) {
+        let latest = -Infinity
+        for (const date of dates) {
+          const t = new Date(date).getTime()
+          if (!isNaN(t) && t > latest) {
+            latest = t
+          }
+        }
+        if (latest !== -Infinity) {
+          return latest < Date.now()
+        }
+      }
+
+      return false
     },
   },
 

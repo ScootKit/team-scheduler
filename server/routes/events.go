@@ -80,6 +80,7 @@ func createEvent(c *gin.Context) {
 
 		// Only for events (not groups)
 		StartOnMonday            *bool               `json:"startOnMonday"`
+		Timezone                 string              `json:"timezone"`
 		NotificationsEnabled     *bool               `json:"notificationsEnabled"`
 		BlindAvailabilityEnabled *bool               `json:"blindAvailabilityEnabled"`
 		DaysOnly                 *bool               `json:"daysOnly"`
@@ -131,6 +132,7 @@ func createEvent(c *gin.Context) {
 		IsSignUpForm:             payload.IsSignUpForm,
 		SignUpBlocks:             payload.SignUpBlocks,
 		StartOnMonday:            payload.StartOnMonday,
+		Timezone:                 payload.Timezone,
 		NotificationsEnabled:     payload.NotificationsEnabled,
 		BlindAvailabilityEnabled: payload.BlindAvailabilityEnabled,
 		DaysOnly:                 payload.DaysOnly,
@@ -274,6 +276,7 @@ func editEvent(c *gin.Context) {
 
 		// Only for events (not groups)
 		StartOnMonday            *bool               `json:"startOnMonday"`
+		Timezone                 string              `json:"timezone"`
 		NotificationsEnabled     *bool               `json:"notificationsEnabled"`
 		BlindAvailabilityEnabled *bool               `json:"blindAvailabilityEnabled"`
 		DaysOnly                 *bool               `json:"daysOnly"`
@@ -326,6 +329,9 @@ func editEvent(c *gin.Context) {
 	event.HasSpecificTimes = payload.HasSpecificTimes
 	event.SignUpBlocks = payload.SignUpBlocks
 	event.StartOnMonday = payload.StartOnMonday
+	if payload.Timezone != "" {
+		event.Timezone = payload.Timezone
+	}
 	event.NotificationsEnabled = payload.NotificationsEnabled
 	event.BlindAvailabilityEnabled = payload.BlindAvailabilityEnabled
 	event.DaysOnly = payload.DaysOnly
@@ -543,6 +549,12 @@ func getEvent(c *gin.Context) {
 		} else {
 			response.User = user
 			response.User.CalendarAccounts = nil
+		}
+
+		// Prefer the timezone captured when this response was submitted (users travel) over the
+		// stale offset stored on the User document at last sign-in.
+		if response.TimezoneOffset != nil && response.User != nil {
+			response.User.TimezoneOffset = *response.TimezoneOffset
 		}
 		responsesMap[userId] = response
 
@@ -818,6 +830,9 @@ func updateEventResponse(c *gin.Context) {
 		// Privacy-policy consent (required for guest submissions; ignored for signed-in users)
 		ConsentedToPrivacyPolicy *bool `json:"consentedToPrivacyPolicy"`
 
+		// Respondent's timezone offset (JS getTimezoneOffset, minutes behind UTC) at submission time.
+		TimezoneOffset *int `json:"timezoneOffset"`
+
 		// Calendar availability variables for Availability Groups feature
 		UseCalendarAvailability *bool                                        `json:"useCalendarAvailability"`
 		EnabledCalendars        *map[string][]string                         `json:"enabledCalendars"`
@@ -889,6 +904,7 @@ func updateEventResponse(c *gin.Context) {
 				IfNeeded:                   payload.IfNeeded,
 				ConsentedToPrivacyPolicyAt: &consentedAt,
 				PrivacyPolicyVersion:       models.CurrentPrivacyPolicyVersion,
+				TimezoneOffset:             payload.TimezoneOffset,
 			}
 		} else {
 			userIdInterface := session.Get("userId")
@@ -907,6 +923,7 @@ func updateEventResponse(c *gin.Context) {
 				UseCalendarAvailability: payload.UseCalendarAvailability,
 				EnabledCalendars:        payload.EnabledCalendars,
 				CalendarOptions:         payload.CalendarOptions,
+				TimezoneOffset:          payload.TimezoneOffset,
 			}
 
 			if event.Type == models.GROUP {
@@ -1288,6 +1305,29 @@ func addEventTopic(c *gin.Context) {
 		return
 	}
 
+	// Announce the suggested topic to any of the owner's webhook folders containing this event.
+	go func(ev models.Event, t models.EventTopic) {
+		folders := db.GetWebhookFoldersForEvent(ev.Id, ev.OwnerId)
+		if len(folders) == 0 {
+			return
+		}
+		eventUrl := fmt.Sprintf("%s/e/%s", utils.GetBaseUrl(), utils.Coalesce(ev.ShortId))
+		desc := fmt.Sprintf("💬 **%s**", sanitizeForDiscord(t.Text))
+		if author := sanitizeForDiscord(t.Name); author != "" {
+			desc += fmt.Sprintf("\n— suggested by %s", author)
+		}
+		embed := discordwebhook.Embed{
+			Title:       fmt.Sprintf("💡 New topic suggested for %s", sanitizeForDiscord(ev.Name)),
+			Description: desc,
+			URL:         eventUrl,
+			Color:       discordwebhook.ColorBlue,
+		}
+		button := discordwebhook.Button{Label: "🔗 View the event", URL: eventUrl}
+		for _, folder := range folders {
+			discordwebhook.SendEmbed(utils.Coalesce(folder.WebhookUrl), embed, button)
+		}
+	}(*event, topic)
+
 	c.JSON(http.StatusOK, topic)
 }
 
@@ -1328,9 +1368,13 @@ func setScheduledEvent(c *gin.Context) {
 		return
 	}
 
-	var update bson.M
 	if payload.Clear || payload.StartDate == nil {
-		update = bson.M{"$unset": bson.M{"scheduledEvent": "", "meetingLink": ""}}
+		update := bson.M{"$unset": bson.M{"scheduledEvent": "", "meetingLink": ""}}
+		if _, err := db.EventsCollection.UpdateOne(context.Background(), bson.M{"_id": event.Id}, update); err != nil {
+			logger.StdErr.Println(err)
+			c.JSON(http.StatusInternalServerError, responses.Error{Error: "failed-to-schedule"})
+			return
+		}
 	} else {
 		// Only allow http(s) links so the value can be safely rendered as an href.
 		link := strings.TrimSpace(payload.MeetingLink)
@@ -1346,27 +1390,50 @@ func setScheduledEvent(c *gin.Context) {
 		if payload.EndDate != nil {
 			scheduled.EndDate = *payload.EndDate
 		}
-		update = bson.M{"$set": bson.M{
-			"scheduledEvent": scheduled,
-			"meetingLink":    link,
-		}}
+		update := bson.M{
+			"$set": bson.M{
+				"scheduledEvent": scheduled,
+				"meetingLink":    link,
+			},
+			// Reset the "starting now" notification flag so it fires for the (new) start time.
+			"$unset": bson.M{"startNotifiedFor": ""},
+		}
 
-		// Notify available respondents only the first time an event is scheduled (not on re-schedule).
-		if event.ScheduledEvent == nil {
+		// First attempt the update conditionally on scheduledEvent NOT existing. This
+		// makes the "first schedule" transition atomic: only the request that actually
+		// moves the event from unscheduled -> scheduled matches this filter, so even
+		// under concurrent requests exactly one of them notifies respondents.
+		firstSetResult, err := db.EventsCollection.UpdateOne(
+			context.Background(),
+			bson.M{"_id": event.Id, "scheduledEvent": bson.M{"$exists": false}},
+			update,
+		)
+		if err != nil {
+			logger.StdErr.Println(err)
+			c.JSON(http.StatusInternalServerError, responses.Error{Error: "failed-to-schedule"})
+			return
+		}
+
+		if firstSetResult.MatchedCount > 0 {
+			// This request performed the first schedule -> notify available respondents.
 			eventCopy := *event
 			go notifyAvailableRespondents(&eventCopy, scheduled, link)
+		} else {
+			// Already scheduled (re-schedule): apply the update unconditionally, no notify.
+			if _, err := db.EventsCollection.UpdateOne(context.Background(), bson.M{"_id": event.Id}, update); err != nil {
+				logger.StdErr.Println(err)
+				c.JSON(http.StatusInternalServerError, responses.Error{Error: "failed-to-schedule"})
+				return
+			}
 		}
-	}
-
-	if _, err := db.EventsCollection.UpdateOne(context.Background(), bson.M{"_id": event.Id}, update); err != nil {
-		logger.StdErr.Println(err)
-		c.JSON(http.StatusInternalServerError, responses.Error{Error: "failed-to-schedule"})
-		return
 	}
 
 	// Announce a (re)schedule to any of the owner's webhook folders containing this event.
 	if !payload.Clear && payload.StartDate != nil {
-		when := payload.StartDate.Time().UTC().Format("Mon, 2 Jan 2006 15:04") + " (UTC)"
+		// Use Discord timestamp markdown so each viewer sees the time in their own locale + a live
+		// relative time. <t:UNIX:F> = full date/short time, <t:UNIX:R> = relative ("in 2 hours").
+		startUnix := payload.StartDate.Time().Unix()
+		when := fmt.Sprintf("<t:%d:F> (<t:%d:R>)", startUnix, startUnix)
 		meetLink := strings.TrimSpace(payload.MeetingLink)
 		go func(ev models.Event, when, meetLink string) {
 			eventUrl := fmt.Sprintf("%s/e/%s", utils.GetBaseUrl(), utils.Coalesce(ev.ShortId))
@@ -1381,8 +1448,13 @@ func setScheduledEvent(c *gin.Context) {
 				URL:         eventUrl,
 				Color:       discordwebhook.ColorGreen,
 			}
+			buttons := []discordwebhook.Button{}
+			if meetLink != "" {
+				buttons = append(buttons, discordwebhook.Button{Label: "📹 Join the meeting", URL: meetLink})
+			}
+			buttons = append(buttons, discordwebhook.Button{Label: "🔗 View the event", URL: eventUrl})
 			for _, folder := range db.GetWebhookFoldersForEvent(ev.Id, ev.OwnerId) {
-				discordwebhook.SendEmbed(utils.Coalesce(folder.WebhookUrl), embed)
+				discordwebhook.SendEmbed(utils.Coalesce(folder.WebhookUrl), embed, buttons...)
 			}
 		}(*event, when, meetLink)
 	}
@@ -1971,6 +2043,13 @@ func duplicateEvent(c *gin.Context) {
 	event.Name = payload.EventName
 	numResponses := 0
 	event.NumResponses = &numResponses
+	// A duplicate is a fresh poll: don't carry over the original's scheduled time, meeting link,
+	// suggested topics, or response deadline (mirrors importEvent's reset).
+	event.ScheduledEvent = nil
+	event.CalendarEventId = ""
+	event.MeetingLink = ""
+	event.Topics = nil
+	event.ResponseDeadline = nil
 	if *payload.CopyAvailability {
 		eventResponses := db.GetEventResponses(originalEventId)
 		for _, eventResponse := range eventResponses {

@@ -111,6 +111,7 @@
                   @scheduleEvent="scheduleEvent"
                   @cancelScheduleEvent="cancelScheduleEvent"
                   @confirmScheduleEvent="confirmScheduleEvent"
+                  @scheduleWannPasstsOnly="scheduleWannPasstsOnly"
                 />
               </div>
             </template>
@@ -158,7 +159,10 @@
                     :style="{
                       height: `${SPLIT_GAP_HEIGHT}px`,
                     }"
-                  ></div>
+                    class="tw-flex tw-items-center tw-justify-end tw-whitespace-nowrap tw-pr-1 tw-text-right tw-text-[9px] tw-leading-tight tw-text-dark-gray"
+                  >
+                    {{ splitGapLabel }}
+                  </div>
                   <div
                     v-if="splitTimes[1].length > 0"
                     :class="calendarOnly ? '' : '-tw-ml-3'"
@@ -343,17 +347,32 @@
                             >
                               <div
                                 :key="`scheduled-${d}-${scheduledBlock.hoursOffset}`"
-                                class="tw-absolute tw-z-10 tw-w-full tw-select-none tw-p-px"
+                                class="tw-absolute tw-z-10 tw-w-full tw-select-none tw-py-0.5 tw-pl-3 tw-pr-0.5"
                                 :style="getTimeBlockStyle(scheduledBlock)"
                                 style="pointer-events: none"
                               >
                                 <div
-                                  class="tw-h-full tw-w-full tw-overflow-hidden tw-text-ellipsis tw-rounded tw-border-2 tw-border-solid tw-border-green tw-bg-pale-green tw-p-px tw-text-xs tw-opacity-90"
+                                  class="tw-h-full tw-w-full tw-overflow-hidden tw-rounded tw-border-2 tw-border-solid tw-border-blue tw-bg-[#D6E9FF] tw-px-1 tw-py-px tw-text-xs tw-leading-tight tw-opacity-90"
                                 >
                                   <div
-                                    class="tw-truncate tw-font-medium tw-text-dark-green"
+                                    class="tw-truncate tw-font-medium tw-text-blue"
                                   >
                                     📅 {{ event.name }}
+                                  </div>
+                                  <div
+                                    v-if="scheduledBlockTimeRange(scheduledBlock)"
+                                    class="tw-truncate tw-text-[10px] tw-text-blue tw-opacity-80"
+                                  >
+                                    {{ scheduledBlockTimeRange(scheduledBlock)
+                                    }}<template v-if="scheduledDurationLabel">
+                                      · {{ scheduledDurationLabel }}</template
+                                    >
+                                  </div>
+                                  <div
+                                    v-if="event.meetingLink"
+                                    class="tw-truncate tw-text-[10px] tw-text-blue tw-opacity-80"
+                                  >
+                                    📹 Meet link
                                   </div>
                                 </div>
                               </div>
@@ -537,6 +556,7 @@
                   @scheduleEvent="scheduleEvent"
                   @cancelScheduleEvent="cancelScheduleEvent"
                   @confirmScheduleEvent="confirmScheduleEvent"
+                  @scheduleWannPasstsOnly="scheduleWannPasstsOnly"
                 />
               </div>
 
@@ -654,7 +674,7 @@
                         <v-text-field
                           v-model="newGuestName"
                           label="Guest name"
-                          autofocus
+                          :autofocus="$autofocusEnabled"
                           @keydown.enter="saveGuestName"
                           hide-details
                         ></v-text-field>
@@ -830,19 +850,6 @@
                 </div>
               </div>
               <template v-else>
-                <PubliftAd
-                  :showAd="showAds"
-                  fuseId="meet_incontent"
-                  class="-tw-mx-4 tw-my-4 tw-block !tw-rounded-none sm:tw-hidden"
-                >
-                  <div class="tw-h-[375px] publift-m:tw-h-[90px]">
-                    <div
-                      id="meet_incontent"
-                      data-fuse="meet_incontent"
-                      class="tw-flex tw-items-center tw-justify-center"
-                    ></div>
-                  </div>
-                </PubliftAd>
                 <RespondentsList
                   ref="respondentsList"
                   :event="event"
@@ -906,13 +913,14 @@
           @scheduleEvent="scheduleEvent"
           @cancelScheduleEvent="cancelScheduleEvent"
           @confirmScheduleEvent="confirmScheduleEvent"
+                  @scheduleWannPasstsOnly="scheduleWannPasstsOnly"
         />
 
         <!-- Fixed bottom section for mobile -->
         <div
           v-if="isPhone && !calendarOnly"
           class="tw-fixed tw-z-20 tw-w-full"
-          :style="{ bottom: showAds ? 'calc(4rem + 115px)' : '4rem' }"
+          :style="{ bottom: '4rem' }"
         >
           <!-- Hint text (mobile) -->
           <v-expand-transition>
@@ -1084,8 +1092,6 @@ import {
 import { mapMutations, mapActions, mapState, mapGetters } from "vuex"
 import UserAvatarContent from "@/components/UserAvatarContent.vue"
 import CalendarAccounts from "@/components/settings/CalendarAccounts.vue"
-import Advertisement from "@/components/event/Advertisement.vue"
-import PubliftAd from "@/components/event/PubliftAd.vue"
 import SignUpBlock from "@/components/sign_up_form/SignUpBlock.vue"
 import SignUpCalendarBlock from "@/components/sign_up_form/SignUpCalendarBlock.vue"
 import SignUpBlocksList from "@/components/sign_up_form/SignUpBlocksList.vue"
@@ -1272,13 +1278,6 @@ export default {
   computed: {
     ...mapState(["authUser", "overlayAvailabilitiesEnabled"]),
     ...mapGetters(["isPremiumUser"]),
-    showAds() {
-      return (
-        !this.ownerIsPremium &&
-        !this.isPremiumUser &&
-        this.state !== this.states.SET_SPECIFIC_TIMES
-      )
-    },
     /** Returns the width of the right side of the calendar */
     rightSideWidth() {
       if (this.isPhone) return "100%"
@@ -1390,8 +1389,10 @@ export default {
     /**
      * Splits the event's PERSISTED scheduled event (set by the owner via the
      * "Schedule this event" dialog) by day, reusing the same positioning math
-     * as calendar events so it lands on the correct grid cells. Returns [] when
-     * no schedule is set or it falls outside the displayed range.
+     * as calendar events so it lands on the correct grid cells. Uses the grid's
+     * active timezoneOffset (driven by the "shown in" selector) so it follows
+     * the selected timezone. Returns [] when no schedule is set or it falls
+     * outside the displayed range.
      */
     persistedScheduledEventByDay() {
       const scheduled = this.event?.scheduledEvent
@@ -1417,6 +1418,31 @@ export default {
         this.weekOffset,
         this.timezoneOffset
       )
+    },
+    /** Total duration of the scheduled event as a compact label ("1h", "1h 30m", "45m"). Uses the
+     *  stored start/end, falling back to the event's configured duration. "" when not scheduled or
+     *  days-only. */
+    scheduledDurationLabel() {
+      if (this.event.daysOnly) return ""
+      const scheduled = this.event?.scheduledEvent
+      let mins
+      if (scheduled?.startDate && scheduled?.endDate) {
+        const start = new Date(scheduled.startDate).getTime()
+        const end = new Date(scheduled.endDate).getTime()
+        if (!isNaN(start) && !isNaN(end) && end > start) {
+          mins = Math.round((end - start) / 60000)
+        }
+      }
+      if (mins == null) {
+        const durationHours = Number(this.event?.duration)
+        if (!durationHours || isNaN(durationHours)) return ""
+        mins = Math.round(durationHours * 60)
+      }
+      const h = Math.floor(mins / 60)
+      const m = mins % 60
+      if (h && m) return `${h}h ${m}m`
+      if (h) return `${h}h`
+      return `${m}m`
     },
     curRespondentsSet() {
       return new Set(this.curRespondents)
@@ -1761,8 +1787,14 @@ export default {
     },
     respondents() {
       return Object.values(this.parsedResponses)
-        .map((r) => r.user)
-        .filter(Boolean)
+        .filter((r) => r.user)
+        .map((r) => ({
+          ...r.user,
+          // Prefer the offset captured ON THE RESPONSE (nullable: null when never captured) over
+          // the always-serialized User.timezoneOffset, which defaults to 0 (UTC) for guests and
+          // would otherwise mislabel every uncaptured respondent as "GMT+0".
+          timezoneOffset: r.timezoneOffset ?? null,
+        }))
     },
     selectedGuestRespondent() {
       if (this.guestAddedAvailability) return this.guestName
@@ -1992,7 +2024,14 @@ export default {
         return splitTimes
       }
 
-      if (localEndTime <= localStartTime && localEndTime !== 0) {
+      // Only split the grid into two blocks for a GENUINE overnight window (one that wraps past
+      // midnight AND leaves a gap during the day, i.e. duration < 24h). A full-day event covers the
+      // whole day with no gap, so localEndTime === localStartTime must NOT trigger a split.
+      if (
+        localEndTime <= localStartTime &&
+        localEndTime !== 0 &&
+        this.event.duration < 24
+      ) {
         for (let i = 0; i < localEndTime; ++i) {
           splitTimes[0].push({
             hoursOffset: this.event.duration - (localEndTime - i),
@@ -2053,6 +2092,14 @@ export default {
     /** Returns the times that are encompassed by startTime and endTime */
     times() {
       return [...this.splitTimes[1], ...this.splitTimes[0]]
+    },
+    /** Label for the gap shown when the available window wraps past midnight in the current
+     *  timezone — explains the break and how many hours are outside the window. "" when no split. */
+    splitGapLabel() {
+      if (this.splitTimes[1].length === 0) return ""
+      const offHours = Math.max(0, Math.round(24 - this.event.duration))
+      if (offHours <= 0) return "outside available hours"
+      return `${offHours}h outside available hours`
     },
     timeslotDuration() {
       return this.event.timeIncrement ?? timeslotDurations.FIFTEEN_MINUTES
@@ -2904,6 +2951,40 @@ export default {
       }
       this.availabilityAnimEnabled = false
     },
+    /** Offset (minutes behind UTC, JS getTimezoneOffset convention) to store on the response. Uses
+     *  the "shown in" selector's timezone — the zone the availability was actually entered in —
+     *  evaluated at the event dates so DST is correct. Falls back to the browser zone. */
+    getResponseTimezoneOffset() {
+      const tzName = this.curTimezone?.value
+      if (!tzName) return new Date().getTimezoneOffset()
+      try {
+        const ref = new Date(this.event?.dates?.[0] || Date.now())
+        const utcWall = new Date(ref.toLocaleString("en-US", { timeZone: "UTC" }))
+        const tzWall = new Date(
+          ref.toLocaleString("en-US", { timeZone: tzName })
+        )
+        return Math.round((utcWall - tzWall) / 60000)
+      } catch (e) {
+        return new Date().getTimezoneOffset()
+      }
+    },
+    /** "12:00 – 13:00" for a scheduled-event grid block, formatted in the "shown in" timezone.
+     *  Returns "" for days-only events or invalid dates. */
+    scheduledBlockTimeRange(block) {
+      if (this.event.daysOnly || !block?.startDate || !block?.endDate) return ""
+      const opts = {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: this.curTimezone?.value,
+      }
+      try {
+        const s = block.startDate.toLocaleTimeString([], opts)
+        const e = block.endDate.toLocaleTimeString([], opts)
+        return `${s} – ${e}`
+      } catch (err) {
+        return ""
+      }
+    },
     async submitAvailability(guestPayload = { name: "", email: "" }) {
       let payload = {}
 
@@ -2939,6 +3020,11 @@ export default {
           localStorage[this.guestNameKey] = guestPayload.name
         }
       }
+
+      // Capture the timezone the availability was entered in. When the grid is shown in a
+      // different timezone via the "shown in" selector, save THAT zone's offset (not the
+      // browser's), so this respondent's times display correctly to everyone.
+      payload.timezoneOffset = this.getResponseTimezoneOffset()
 
       await post(`/events/${this.event._id}/response`, payload)
 
@@ -3718,7 +3804,44 @@ export default {
       this.$emit("openScheduleDialog", {
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
+        timezone: this.curTimezone.value,
       })
+    },
+    /** Schedule the event on WannPassts only — no external calendar. Opens the schedule dialog
+     *  prefilled with the dragged-out time so the owner can add a meeting link and save. */
+    scheduleWannPasstsOnly() {
+      const dates = this.computeScheduledDates()
+      if (!dates) return
+      this.$posthog.capture("schedule_event_confirmed")
+      this.state = this.defaultState
+      this.$emit("openScheduleDialog", {
+        startDate: dates.startDate.toISOString(),
+        endDate: dates.endDate.toISOString(),
+        timezone: this.curTimezone.value,
+      })
+    },
+    /** Computes {startDate, endDate} from the area the user dragged out on the grid (shared by the
+     *  Google/Outlook and WannPassts-only schedule flows). Returns null if nothing is selected. */
+    computeScheduledDates() {
+      if (!this.curScheduledEvent) return null
+      const { col, row, numRows } = this.curScheduledEvent
+      let startDate = this.getDateFromRowCol(row, col)
+      let endDate = new Date(startDate)
+      endDate.setMinutes(startDate.getMinutes() + this.timeslotDuration * numRows)
+
+      if (this.isWeekly || this.isGroup) {
+        let offset = 0
+        if (this.isGroup) {
+          offset = this.weekOffset
+        } else if (this.isWeekly) {
+          if (new Date().getDay() > startDate.getDay()) {
+            offset = 1
+          }
+        }
+        startDate = dateToDowDate(this.event.dates, startDate, offset, true)
+        endDate = dateToDowDate(this.event.dates, endDate, offset, true)
+      }
+      return { startDate, endDate }
     },
     //#endregion
 
@@ -4482,6 +4605,15 @@ export default {
     },
   },
   watch: {
+    // Surface the active "shown in" timezone to the parent so page-level displays
+    // (scheduled-event banner, deadline) can format in the selected timezone.
+    curTimezone: {
+      immediate: true,
+      deep: true,
+      handler(val) {
+        this.$emit("update:selectedTimezone", val)
+      },
+    },
     availability() {
       if (this.state === this.states.EDIT_AVAILABILITY) {
         this.unsavedChanges = true
@@ -4724,8 +4856,6 @@ export default {
     ToolRow,
     CalendarAccounts,
     RespondentsList,
-    Advertisement,
-    PubliftAd,
     GCalWeekSelector,
     WorkingHoursToggle,
     SignUpBlock,

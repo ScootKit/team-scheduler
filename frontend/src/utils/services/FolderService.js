@@ -2,12 +2,17 @@ import { post, _delete, patch } from "../fetch_utils"
 
 const FOLDER_API_ROUTE = "/user/folders"
 
-export const createFolder = (name, color) => {
-  return post(FOLDER_API_ROUTE, { name, color })
+export const createFolder = (name, color, webhookUrl, isPublic) => {
+  return post(FOLDER_API_ROUTE, { name, color, webhookUrl, isPublic })
 }
 
-export const updateFolder = (folderId, name, color) => {
-  return patch(`${FOLDER_API_ROUTE}/${folderId}`, { name, color })
+export const updateFolder = (folderId, name, color, webhookUrl, isPublic) => {
+  return patch(`${FOLDER_API_ROUTE}/${folderId}`, {
+    name,
+    color,
+    webhookUrl,
+    isPublic,
+  })
 }
 
 export const deleteFolder = (folderId) => {

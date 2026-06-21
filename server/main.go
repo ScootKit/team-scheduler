@@ -22,6 +22,7 @@ import (
 	"schej.it/server/db"
 	"schej.it/server/logger"
 	"schej.it/server/routes"
+	"schej.it/server/services/eventreminder"
 	"schej.it/server/services/gcloud"
 	"schej.it/server/utils"
 
@@ -118,6 +119,9 @@ func main() {
 	// Init google cloud stuff
 	closeTasks := gcloud.InitTasks()
 	defer closeTasks()
+
+	// Start the in-process poller that posts "starting now" Discord notifications.
+	eventreminder.StartPoller()
 
 	// Session
 	store := cookie.NewStore([]byte(os.Getenv("SESSION_SECRET")))
