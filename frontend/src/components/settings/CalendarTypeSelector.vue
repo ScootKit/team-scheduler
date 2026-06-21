@@ -20,32 +20,6 @@
                 <v-spacer />
               </div>
             </v-btn>
-            <v-btn block @click="state = states.APPLE_CREDENTIALS">
-              <div class="tw-flex tw-w-full tw-items-center tw-gap-2">
-                <v-img
-                  class="tw-flex-initial"
-                  width="20"
-                  height="20"
-                  src="@/assets/apple_logo.svg"
-                />
-                <v-spacer />
-                Apple Calendar
-                <v-spacer />
-              </div>
-            </v-btn>
-            <v-btn block @click="$emit('addOutlookCalendar')">
-              <div class="tw-flex tw-w-full tw-items-center tw-gap-2">
-                <v-img
-                  class="tw-flex-initial"
-                  width="20"
-                  height="20"
-                  src="@/assets/outlook_logo.svg"
-                />
-                <v-spacer />
-                Outlook Calendar
-                <v-spacer />
-              </div>
-            </v-btn>
             <v-btn block @click="state = states.ICS_CREDENTIALS">
               <div class="tw-flex tw-w-full tw-items-center tw-gap-2">
                 <v-icon
@@ -64,13 +38,6 @@
       </div>
     </v-expand-transition>
     <v-expand-transition>
-      <AppleCredentials
-        v-if="state === states.APPLE_CREDENTIALS"
-        @back="state = states.PICK_CALENDAR"
-        @addedCalendar="$emit('addedCalendar')"
-      />
-    </v-expand-transition>
-    <v-expand-transition>
       <ICSCredentials
         v-if="state === states.ICS_CREDENTIALS"
         @back="state = states.PICK_CALENDAR"
@@ -81,14 +48,12 @@
 </template>
 
 <script>
-import AppleCredentials from "@/components/calendar_permission_dialogs/AppleCredentials.vue"
 import ICSCredentials from "@/components/calendar_permission_dialogs/ICSCredentials.vue";
 
 export default {
   name: "CalendarTypeSelector",
 
   components: {
-    AppleCredentials,
     ICSCredentials
   },
 
@@ -103,7 +68,6 @@ export default {
     return {
       states: {
         PICK_CALENDAR: "pick-calendar",
-        APPLE_CREDENTIALS: "apple-credentials",
         ICS_CREDENTIALS: "ics-credentials",
       },
       state: "pick-calendar",

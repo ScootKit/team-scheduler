@@ -27,7 +27,6 @@ import (
 	"schej.it/server/services/auth"
 	"schej.it/server/services/calendar"
 	"schej.it/server/services/listmonk"
-	"schej.it/server/services/microsoftgraph"
 	"schej.it/server/utils"
 )
 
@@ -174,13 +173,6 @@ func signInHelper(c *gin.Context, token auth.TokenResponse, tokenOrigin models.T
 		firstName = info.GivenName
 		lastName = info.FamilyName
 		picture = info.Picture
-	} else if calendarType == models.OutlookCalendarType {
-		// Get user info from microsoft graph
-		userInfo := microsoftgraph.GetUserInfo(nil, &calendarAuth)
-		email = userInfo.Email
-		firstName = userInfo.FirstName
-		lastName = userInfo.LastName
-		picture = ""
 	}
 	email = utils.NormalizeEmail(email)
 

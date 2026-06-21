@@ -251,8 +251,6 @@ func RefreshUserTokenIfNecessary(u *models.User, accounts models.Set[string]) {
 func getCredentialsFromCalendarType(calendarType models.CalendarType) (string, string) {
 	if calendarType == models.GoogleCalendarType {
 		return os.Getenv("CLIENT_ID"), os.Getenv("CLIENT_SECRET")
-	} else if calendarType == models.OutlookCalendarType {
-		return os.Getenv("MICROSOFT_CLIENT_ID"), os.Getenv("MICROSOFT_CLIENT_SECRET")
 	}
 
 	return "", ""
@@ -261,8 +259,6 @@ func getCredentialsFromCalendarType(calendarType models.CalendarType) (string, s
 func getTokenEndpointFromCalendarType(calendarType models.CalendarType) string {
 	if calendarType == models.GoogleCalendarType {
 		return "https://oauth2.googleapis.com/token"
-	} else if calendarType == models.OutlookCalendarType {
-		return "https://login.microsoftonline.com/common/oauth2/v2.0/token"
 	}
 
 	return ""

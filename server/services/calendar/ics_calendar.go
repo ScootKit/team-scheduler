@@ -130,3 +130,34 @@ func (cal *ICSCalendar) GetCalendarEvents(calendarId string, timeMin time.Time, 
 
 	return events, nil
 }
+
+// parseTimeWithTZ parses an ICS datetime property, honoring a TZID parameter
+// when present and otherwise treating the value as UTC.
+func parseTimeWithTZ(prop *ical.Prop) (time.Time, error) {
+	if prop == nil {
+		return time.Time{}, fmt.Errorf("missing datetime property")
+	}
+
+	timeStr := prop.Value
+	tzID := prop.Params.Get("TZID")
+
+	var t time.Time
+	var err error
+
+	if tzID != "" {
+		loc, err := time.LoadLocation(tzID)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("invalid timezone: %v", err)
+		}
+		//lint:ignore SA4006 err is in fact used later in the code
+		t, err = time.ParseInLocation("20060102T150405", timeStr, loc)
+	} else {
+		t, err = time.Parse("20060102T150405Z", timeStr)
+	}
+
+	if err != nil {
+		return time.Time{}, fmt.Errorf("unable to parse time: %v", err)
+	}
+
+	return t, nil
+}

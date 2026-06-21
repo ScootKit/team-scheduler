@@ -6,16 +6,10 @@
       <!-- Mark availability option dialog -->
       <MarkAvailabilityDialog
         v-model="choiceDialog"
-        :initialState="linkApple ? 'create_account_apple' : 'choices'"
-        @signInLinkApple="signInLinkApple"
         @allowGoogleCalendar="
           () => setAvailabilityAutomatically(calendarTypes.GOOGLE)
         "
-        @allowOutlookCalendar="
-          () => setAvailabilityAutomatically(calendarTypes.OUTLOOK)
-        "
         @setAvailabilityManually="setAvailabilityManually"
-        @addedAppleCalendar="addedAppleCalendar"
         @addedICSCalendar="addedICSCalendar"
       />
 

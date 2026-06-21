@@ -72,7 +72,6 @@
             <CalendarTypeSelector
               :visible="addCalendarAccountDialog"
               @addGoogleCalendar="addGoogleCalendar"
-              @addOutlookCalendar="addOutlookCalendar"
               @addedCalendar="addedCalendar"
             />
           </v-dialog>
@@ -104,7 +103,6 @@ import {
   post,
   _delete,
   signInGoogle,
-  signInOutlook,
   getCalendarAccountKey,
 } from "@/utils"
 import CalendarAccount from "@/components/settings/CalendarAccount.vue"
@@ -162,18 +160,6 @@ export default {
         },
         requestCalendarPermission: true,
         selectAccount: true,
-      })
-    },
-    addOutlookCalendar() {
-      signInOutlook({
-        state: {
-          type: this.toggleState
-            ? authTypes.ADD_CALENDAR_ACCOUNT_FROM_EDIT
-            : authTypes.ADD_CALENDAR_ACCOUNT,
-          eventId: this.eventId,
-          calendarType: calendarTypes.OUTLOOK,
-        },
-        requestCalendarPermission: true,
       })
     },
     addedCalendar() {
